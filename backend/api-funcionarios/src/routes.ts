@@ -25,18 +25,29 @@ router.get('/funcionarios', async (_req: Request, res: Response) => {
 
 // READ — um específico
 router.get('/funcionarios/:id', async (req: Request, res: Response) => {
-  const { id } = req.params
-  const funcionario = await db.funcionario.findUnique({
-    where: { id: Number(id) },
-  })
+  try {
+    const { id } = req.params
+    if (Number.isNaN(Number(id))) {
+      res.status(400).json({ error: 'ID inválido.' })
+      return
+    }
 
-  if (!funcionario) {
-    res.status(404).json({ error: 'Funcionário não encontrado.' })
-    return
+    const funcionario = await db.funcionario.findUnique({
+      where: { id: Number(id) },
+    })
+
+    if (!funcionario) {
+      res.status(404).json({ error: 'Funcionário não encontrado.' })
+      return
+    }
+
+    res.json(funcionario)
+  } catch (error) {
+    console.error(error)
+    res.status(400).json({ error: 'Não foi possível buscar o funcionário.' })
   }
-
-  res.json(funcionario)
 })
+
 
 // UPDATE
 router.put('/funcionarios/:id', async (req: Request, res: Response) => {
