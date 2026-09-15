@@ -14,15 +14,15 @@ COPY backend/api-credencial/package.json ./backend/api-credencial/
 RUN pnpm install --frozen-lockfile
 
 COPY backend/packages ./backend/packages
-COPY backend/api-clientes ./backend/api-clientes
+COPY backend/api-credencial ./backend/api-credencial
 
 WORKDIR /app/backend/packages/shared-db
 RUN pnpm exec prisma generate
 
-WORKDIR /app/backend/api-clientes
+WORKDIR /app/backend/api-credencial
 
 ENV NODE_ENV=production
-ENV PORT=3001
-EXPOSE 3001
+ENV PORT=3004
+EXPOSE 3004
 
 CMD ["pnpm", "start"]

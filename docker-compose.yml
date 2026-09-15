@@ -35,7 +35,7 @@ services:
     container_name: geroncio-api-clientes
     build:
       context: .
-      dockerfile: ./api-clientes/Dockerfile
+      dockerfile: ./backend/api-clientes/Dockerfile
     ports:
       - "3001:3001"
     environment:
@@ -47,7 +47,7 @@ services:
     container_name: geroncio-api-pedidos
     build:
       context: .
-      dockerfile: ./api-pedidos/Dockerfile
+      dockerfile: ./backend/api-pedidos/Dockerfile
     ports:
       - "3002:3002"
     environment:
@@ -59,7 +59,7 @@ services:
     container_name: geroncio-api-restaurantes
     build:
       context: .
-      dockerfile: ./api-restaurantes/Dockerfile
+      dockerfile: ./backend/api-restaurantes/Dockerfile
     ports:
       - "3003:3003"
     environment:
@@ -71,7 +71,7 @@ services:
     container_name: geroncio-api-credencial
     build:
       context: .
-      dockerfile: ./api-credencial/Dockerfile
+      dockerfile: ./backend/api-credencial/Dockerfile
     ports:
       - "3004:3004"
     environment:
