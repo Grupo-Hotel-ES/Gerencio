@@ -13,7 +13,8 @@
     "db:generate": "prisma generate",
     "backend": "cd backend && pnpm dev",
     "backend:docker": "cd backend && pnpm docker:up",
-    "mock": "cd mock/mock_frontend && pnpm start && cd .. && pnpm db:up && pnpm db:studio"
+    "mock": "cd mock && pnpm db:up && cd mock_frontend && pnpm start",
+    "mock:studio": "cd mock && pnpm db:studio"
   },
   "keywords": [],
   "author": "",
