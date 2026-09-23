@@ -18,5 +18,20 @@ services:
       timeout: 5s
       retries: 10
 
+  mock-api:
+    build:
+      context: .
+      dockerfile: mock_backend/mock_api/Dockerfile
+    container_name: gerencio-mock-api
+    restart: unless-stopped
+    environment:
+      MOCK_DATABASE_URL: postgresql://${MOCK_DB_USER:-mock}:${MOCK_DB_PASSWORD:-mock}@mock-delivery-db:5432/${MOCK_DB_NAME:-mock_delivery}?schema=public
+      MOCK_API_PORT: 3333
+    ports:
+      - "${MOCK_API_PORT:-3333}:3333"
+    depends_on:
+      mock-delivery-db:
+        condition: service_healthy
+
 volumes:
   mock-delivery-data:

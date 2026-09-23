@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import './App.css';
 
+// Endereço da API do mock (mock_backend/mock_api), que grava os pedidos no banco do mock
+const API_URL = process.env.REACT_APP_MOCK_API_URL || 'http://localhost:3333';
+
 export default function App() {
   // 1. Os dados dos produtos 
   const produtos = [
@@ -18,6 +21,7 @@ export default function App() {
   const [appSelecionado, setAppSelecionado] = useState('ifood');
   const [nome, setNome] = useState('');
   const [endereco, setEndereco] = useState('');
+  const [enviando, setEnviando] = useState(false);
 
   // 3. A Lógica Matemática
   const adicionarAoCarrinho = (id) => {
@@ -54,9 +58,10 @@ export default function App() {
   }, 0);
 
   // A função final de pagamento agora verifica se o usuário preencheu a Aba 1
-  const enviarMock = (e) => {
-    e.preventDefault(); 
-    
+  const enviarMock = async (e) => {
+    e.preventDefault();
+    if (enviando) return;
+
     // Verifica se os dados do outro cômodo foram preenchidos
     if (!nome || !endereco) {
       alert("Por favor, preencha seu Nome e Endereço primeiro!");
@@ -66,7 +71,34 @@ export default function App() {
     
     if (valorTotal === 0) return alert("Seu carrinho está vazio!");
     
-    alert(`Mock: Pedido de R$ ${valorTotal.toFixed(2)} para ${nome} simulado pelo ${appSelecionado}!`);
+    // Monta os itens do carrinho no formato da API (preços em centavos)
+    const itens = produtos
+      .filter(produto => carrinho[produto.id])
+      .map(produto => ({
+        codigoExterno: produto.id,
+        nome: produto.nome,
+        quantidade: carrinho[produto.id],
+        precoUnitarioCentavos: Math.round(produto.preco * 100)
+      }));
+
+    setEnviando(true);
+    try {
+      const resposta = await fetch(`${API_URL}/pedidos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plataforma: appSelecionado, cliente: { nome }, endereco, itens })
+      });
+      const pedido = await resposta.json();
+      if (!resposta.ok) throw new Error(pedido.erro || `Erro ${resposta.status}`);
+
+      alert(`Mock: Pedido #${pedido.codigoExibicao} de R$ ${(pedido.totalCentavos / 100).toFixed(2)} para ${nome} enviado pelo ${appSelecionado}!`);
+      setCarrinho({});
+      setAbaAtiva('pedido');
+    } catch (erro) {
+      alert(`Não foi possível enviar o pedido: ${erro.message}`);
+    } finally {
+      setEnviando(false);
+    }
   };
 
   // 4. O "Plástico" dos blocos de montar (Cores)
@@ -177,7 +209,7 @@ export default function App() {
 
             {/* O botão mágico que verifica tudo e finaliza */}
             <button onClick={enviarMock} style={{ padding: '15px', backgroundColor: valorTotal > 0 ? '#27ae60' : '#444', color: 'white', border: 'none', borderRadius: '5px', cursor: valorTotal > 0 ? 'pointer' : 'not-allowed', fontWeight: 'bold', fontSize: '16px' }}>
-              Opção de Pagamento
+              {enviando ? 'Enviando...' : 'Opção de Pagamento'}
             </button>
           </div>
 

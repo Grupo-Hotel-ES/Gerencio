@@ -11,7 +11,7 @@
     "db:migrate": "cd backend && pnpm db:migrate",
     "backend": "cd backend && pnpm dev",
     "backend:docker": "cd backend && pnpm docker:up",
-    "mock": "cd mock/mock_frontend && pnpm start"
+    "mock": "cd mock/mock_frontend && pnpm start && pnpm db:up && pnpm db:studio"
   },
   "keywords": [],
   "author": "",
