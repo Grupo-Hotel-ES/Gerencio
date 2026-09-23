@@ -1,17 +1,35 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './App.css';
 
 // Endereço da API do mock (mock_backend/mock_api), que grava os pedidos no banco do mock
 const API_URL = process.env.REACT_APP_MOCK_API_URL || 'http://localhost:3333';
+// Endereço da api-produtos do Gerencio (backend/api-produtos), de onde vem o cardápio
+const PRODUTOS_API_URL = process.env.REACT_APP_PRODUTOS_API_URL || 'http://localhost:3004/api';
+
+// A api-produtos não tem imagem; mostra um ícone no lugar quando o produto não tiver
+function ImagemProduto({ produto, tamanho }) {
+  const estilo = { width: tamanho, height: tamanho, borderRadius: '8px', objectFit: 'cover', marginRight: '15px', flexShrink: 0 };
+  if (produto.img) return <img src={produto.img} alt={produto.nome} style={estilo} />;
+  return <div style={{ ...estilo, backgroundColor: '#333', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tamanho / 2 }}>🍽️</div>;
+}
 
 export default function App() {
-  // 1. Os dados dos produtos 
-  const produtos = [
-    { id: 1, nome: 'Chicken Junior', preco: 4.00, img: 'CHICKENJUNIOR.jpg' },
-    { id: 2, nome: 'X-Tudo Burguer', preco: 25.00, img: 'X-TUDO.jpg' },
-    { id: 3, nome: 'Espetinho de Carne', preco: 17.00, img: 'ESPETINHO_CARNE.jpg' },
-    { id: 4, nome: 'Pizza', preco: 17.00, img: 'PIZZA.jpg' }
-  ];
+  // 1. Os dados dos produtos (carregados da api-produtos quando a tela abre)
+  const [produtos, setProdutos] = useState([]);
+  const [erroProdutos, setErroProdutos] = useState(null);
+  const [carregandoProdutos, setCarregandoProdutos] = useState(true);
+
+  useEffect(() => {
+    fetch(`${PRODUTOS_API_URL}/produtos`)
+      .then(resposta => {
+        if (!resposta.ok) throw new Error(`Erro ${resposta.status}`);
+        return resposta.json();
+      })
+      // O preço vem como texto (Decimal no banco), então é convertido para número
+      .then(lista => setProdutos(lista.map(produto => ({ ...produto, preco: Number(produto.preco) }))))
+      .catch(erro => setErroProdutos(erro.message))
+      .finally(() => setCarregandoProdutos(false));
+  }, []);
 
   // 2. A "Memória" do aplicativo (Nosso interruptor de luz começa no 'pedido')
   const [abaAtiva, setAbaAtiva] = useState('pedido');
@@ -70,10 +88,14 @@ export default function App() {
     }
     
     if (valorTotal === 0) return alert("Seu carrinho está vazio!");
+
+    // Cada pedido pertence a um único restaurante
+    const produtosNoCarrinho = produtos.filter(produto => carrinho[produto.id]);
+    const restaurantes = new Set(produtosNoCarrinho.map(produto => produto.restauranteId));
+    if (restaurantes.size > 1) return alert("O carrinho tem produtos de mais de um restaurante. Faça um pedido por restaurante.");
     
     // Monta os itens do carrinho no formato da API (preços em centavos)
-    const itens = produtos
-      .filter(produto => carrinho[produto.id])
+    const itens = produtosNoCarrinho
       .map(produto => ({
         codigoExterno: produto.id,
         nome: produto.nome,
@@ -86,7 +108,7 @@ export default function App() {
       const resposta = await fetch(`${API_URL}/pedidos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plataforma: appSelecionado, cliente: { nome }, endereco, itens })
+        body: JSON.stringify({ plataforma: appSelecionado, restauranteId: String(produtosNoCarrinho[0].restauranteId), cliente: { nome }, endereco, itens })
       });
       const pedido = await resposta.json();
       if (!resposta.ok) throw new Error(pedido.erro || `Erro ${resposta.status}`);
@@ -144,13 +166,17 @@ export default function App() {
         {/* CÔMODO 2: CARDÁPIO */}
         <div style={{ display: abaAtiva === 'cardapio' ? 'block' : 'none', paddingBottom: '60px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            {erroProdutos && <p style={{ textAlign: 'center', color: '#e74c3c' }}>Não foi possível carregar o cardápio ({erroProdutos}). A api-produtos está rodando?</p>}
+            {carregandoProdutos && <p style={{ textAlign: 'center', color: '#666' }}>Carregando cardápio...</p>}
+            {!carregandoProdutos && !erroProdutos && produtos.length === 0 && <p style={{ textAlign: 'center', color: '#666' }}>Nenhum produto cadastrado.</p>}
             {produtos.map((item) => (
               <div key={item.id} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#2a2a2a', borderRadius: '8px', padding: '10px' }}>
                 
-                <img src={item.img} alt={item.nome} style={{ width: '70px', height: '70px', borderRadius: '8px', objectFit: 'cover', marginRight: '15px' }} />
+                <ImagemProduto produto={item} tamanho={70} />
                 
                 <div style={{ flex: 1 }}>
                   <h4 style={{ margin: '0 0 5px 0', fontSize: '15px' }}>{item.nome}</h4>
+                  {item.restaurante && <div style={{ fontSize: '12px', color: '#999', marginBottom: '5px' }}>{item.restaurante.nome}</div>}
                   <span style={{ color: '#27ae60', fontWeight: 'bold' }}>R$ {item.preco.toFixed(2).replace('.', ',')}</span>
                 </div>
 
@@ -183,7 +209,7 @@ export default function App() {
 
               return (
                 <div key={item.id} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#2a2a2a', padding: '10px', borderRadius: '5px' }}>
-                  <img src={item.img} alt={item.nome} style={{ width: '40px', height: '40px', borderRadius: '5px', objectFit: 'cover', marginRight: '10px' }} />
+                  <ImagemProduto produto={item} tamanho={40} />
                   <div style={{ flex: 1, fontSize: '14px' }}>{item.nome}</div>
                   
                   <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#121212', borderRadius: '5px', marginRight: '10px' }}>

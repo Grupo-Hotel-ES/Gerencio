@@ -9,9 +9,11 @@
     "db": "cd backend && pnpm db:up",
     "studio": "cd backend && pnpm db:studio",
     "db:migrate": "cd backend && pnpm db:migrate",
+    "db:status": "dotenv -e ../../.env -- prisma migrate status",
+    "db:generate": "prisma generate",
     "backend": "cd backend && pnpm dev",
     "backend:docker": "cd backend && pnpm docker:up",
-    "mock": "cd mock/mock_frontend && pnpm start && pnpm db:up && pnpm db:studio"
+    "mock": "cd mock/mock_frontend && pnpm start && cd .. && pnpm db:up && pnpm db:studio"
   },
   "keywords": [],
   "author": "",
