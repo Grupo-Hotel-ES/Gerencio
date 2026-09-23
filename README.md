@@ -96,6 +96,7 @@ O Nginx faz o roteamento das requisições para os microsserviços em containers
 .
 ├── frontend/        # App React Native + Expo (rotas em src/app)
 ├── backend/         # API Express.js
+├── mock/            # Mock das plataformas de delivery (formulário web + API + banco)
 ├── docs/            # Pitch e documentação do projeto
 └── package.json     # Workspace raiz (pnpm)
 ```
@@ -122,6 +123,26 @@ pnpm studio
 ```
 
 O Expo abre o menu com as opções de execução: build de desenvolvimento, emulador Android, simulador iOS, Expo Go ou navegador. Dentro de `frontend/` também estão disponíveis `pnpm android`, `pnpm ios`, `pnpm web` e `pnpm lint`.
+
+### Mock das plataformas de delivery
+
+O `mock/` simula as plataformas de delivery (iFood, 99Food, Keeta, Uber Eats, Rappi): um formulário web monta pedidos, que são gravados em um banco próprio pela API do mock. O cardápio vem da `api-produtos` do backend, então suba o backend antes (`pnpm backend:docker`).
+
+```bash
+# sobe o banco e a API do mock (Docker) e abre o formulário web
+pnpm mock
+
+# abre o Prisma Studio do banco do mock (em outro terminal)
+pnpm mock:studio
+```
+
+| Serviço | Endereço |
+| --- | --- |
+| Formulário web | http://localhost:3000 |
+| API do mock | http://localhost:3333 |
+| Banco do mock (Postgres) | `localhost:5433` |
+
+O banco e a API continuam rodando depois de fechar o formulário; para derrubá-los, use `cd mock && pnpm db:down`.
 
 > **Status:** o frontend está em desenvolvimento e o backend ainda não foi implementado — `backend/` contém apenas a configuração inicial do pacote.
 
