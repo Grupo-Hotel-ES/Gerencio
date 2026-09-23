@@ -1,0 +1,53 @@
+@baseUrl = http://localhost:3001/api
+
+### 1. Criar Cliente
+# @name createCliente
+POST {{baseUrl}}/clientes
+Content-Type: application/json
+
+{
+  "nomeCliente": "Felipe Freitas D Elia",
+  "endereco": "Rua Ismael Vieira das Neves, 53",
+  "telefone": "11990202829",
+  "email": "ffdelia@unifesp.br",
+  "cpf": "67890878134"
+}
+
+###
+
+### 2. Listar Todos os Clientes
+GET {{baseUrl}}/clientes
+
+###
+
+### 3. Buscar Cliente por ID
+GET {{baseUrl}}/clientes/1
+
+###
+
+### 4. Atualizar Cliente (PUT - Substituição Completa)
+PUT {{baseUrl}}/clientes/1
+Content-Type: application/json
+
+{
+  "nomeCliente": "Joao Pedro Soldera",
+  "endereco": "Av. Cesare Mansueto Giulio Lattes, 1201",
+  "telefone": "11956789897",
+  "email": "joao@unifesp.br",
+  "cpf": "12345678901"
+}
+
+###
+
+### 5. Deletar Cliente
+DELETE {{baseUrl}}/clientes/1
+
+###
+
+### 6. Testar ID Inválido (Tratamento de Erro - 400)
+GET {{baseUrl}}/clientes/abc
+
+###
+
+### 7. Buscar Cliente Inexistente (Tratamento de Erro - 404)
+GET {{baseUrl}}/clientes/9999

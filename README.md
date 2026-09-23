@@ -110,6 +110,15 @@ pnpm install
 
 # iniciar o app (Expo)
 pnpm dev
+
+# iniciar o DB (Postgres)
+pnpm db
+
+# iniciar o Backend inteiro (DB + Serviços)
+pnpm backend:docker
+
+# iniciar o Prisma Studio
+pnpm studio
 ```
 
 O Expo abre o menu com as opções de execução: build de desenvolvimento, emulador Android, simulador iOS, Expo Go ou navegador. Dentro de `frontend/` também estão disponíveis `pnpm android`, `pnpm ios`, `pnpm web` e `pnpm lint`.

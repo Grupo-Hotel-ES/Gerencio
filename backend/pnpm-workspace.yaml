@@ -5,3 +5,6 @@ allowBuilds:
   msgpackr-extract: true
   prisma: true
   workerd: true
+packages:
+  - 'api-*'
+  - 'packages/*'

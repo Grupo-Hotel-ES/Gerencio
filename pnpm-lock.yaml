@@ -205,4 +205,22 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    dependencies:
+      npx:
+        specifier: ^10.2.2
+        version: 10.2.2
+
+packages:
+
+  npx@10.2.2:
+    resolution: {integrity: sha512-eImmySusyeWphzs5iNh791XbZnZG0FSNvM4KSah34pdQQIDsdTDhIwg1sjN3AIVcjGLpbQ/YcfqHPshKZQK1fA==}
+    deprecated: This package is now part of the npm CLI.
+    hasBin: true
+    bundledDependencies:
+      - npm
+      - libnpx
+
+snapshots:
+
+  npx@10.2.2: {}

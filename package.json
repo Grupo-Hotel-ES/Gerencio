@@ -5,7 +5,15 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "cd frontend && npx expo start"
+    "dev": "cd frontend && npx expo start",
+    "db": "cd backend && pnpm db:up",
+    "studio": "cd backend && pnpm db:studio",
+    "db:migrate": "cd backend && pnpm db:migrate",
+    "db:status": "dotenv -e ../../.env -- prisma migrate status",
+    "db:generate": "prisma generate",
+    "backend": "cd backend && pnpm dev",
+    "backend:docker": "cd backend && pnpm docker:up",
+    "mock": "cd mock/mock_frontend && pnpm start && cd .. && pnpm db:up && pnpm db:studio"
   },
   "keywords": [],
   "author": "",
@@ -17,5 +25,8 @@
       "onFail": "download"
     }
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "npx": "^10.2.2"
+  }
 }

@@ -1,3 +1,12 @@
+x-api-common: &api-common
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+  environment: &api-env
+    DATABASE_URL: postgresql://${POSTGRES_USER:-geroncio}:${POSTGRES_PASSWORD:-geroncio_dev}@postgres:5432/${POSTGRES_DB:-geroncio}
+    NODE_ENV: production
+
 services:
   postgres:
     image: postgis/postgis:16-3.4
@@ -20,5 +29,54 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api-clientes:
+    <<: *api-common
+    container_name: geroncio-api-clientes
+    build:
+      context: .
+      dockerfile: ./api-clientes/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      <<: *api-env
+      PORT: 3001
+
+  api-pedidos:
+    <<: *api-common
+    container_name: geroncio-api-pedidos
+    build:
+      context: .
+      dockerfile: ./api-pedidos/Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      <<: *api-env
+      PORT: 3002
+
+  api-restaurantes:
+    <<: *api-common
+    container_name: geroncio-api-restaurantes
+    build:
+      context: .
+      dockerfile: ./api-restaurantes/Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      <<: *api-env
+      PORT: 3003
+
+  api-produtos:
+    <<: *api-common
+    container_name: geroncio-api-produtos
+    build:
+      context: .
+      dockerfile: ./api-produtos/Dockerfile
+    ports:
+      - "3004:3004"
+    environment:
+      <<: *api-env
+      PORT: 3004
+
 volumes:
   geroncio_pgdata:

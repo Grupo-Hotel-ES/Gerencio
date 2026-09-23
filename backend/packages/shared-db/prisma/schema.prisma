@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -23,6 +24,7 @@ enum StatusPedido {
 enum TipoFuncionario {
   PROPRIETARIO
   ENTREGADOR
+  CAIXA
 }
 
 model Restaurante {
@@ -36,8 +38,7 @@ model Restaurante {
   endereco    String
   credenciais CredencialPlataforma[]
   vinculos    VinculoFuncionario[]
-  veiculos    Veiculo[]
-  estoques    Estoque[]
+  produtos    Produto[]
 }
 
 model CredencialPlataforma {
@@ -51,65 +52,37 @@ model CredencialPlataforma {
 }
 
 model Funcionario {
-  id               Int                  @id @default(autoincrement())
-  nome             String
-  cpf              String               @unique
-  telefone         String
-  email            String
-  tipo             TipoFuncionario      @default(ENTREGADOR)
-  status           StatusEntregador?
-  vinculos         VinculoFuncionario[]
-  veiculos         Veiculo[]
-  entregas         Entrega[]
+  id       Int                  @id @default(autoincrement())
+  nome     String
+  cpf      String               @unique
+  telefone String
+  email    String
+  tipo     TipoFuncionario      @default(ENTREGADOR)
+  status   StatusEntregador?
+  vinculos VinculoFuncionario[]
+  entregas Entrega[]
 }
 
 model VinculoFuncionario {
-  id            Int         @id @default(autoincrement())
   restauranteId Int         @map("restaurante_id")
   funcionarioId Int         @map("funcionario_id")
   dataInicio    DateTime    @map("data_inicio")
   dataFim       DateTime?   @map("data_fim")
   restaurante   Restaurante @relation(fields: [restauranteId], references: [id], onDelete: Cascade)
   funcionario   Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
-}
 
-model Veiculo {
-  id            Int          @id @default(autoincrement())
-  modelo        String
-  marca         String
-  placa         String       @unique
-  restauranteId Int?         @map("restaurante_id")
-  funcionarioId Int?         @map("funcionario_id")
-  restaurante   Restaurante? @relation(fields: [restauranteId], references: [id])
-  funcionario   Funcionario? @relation(fields: [funcionarioId], references: [id])
-}
-
-model Estoque {
-  id            Int              @id @default(autoincrement())
-  endereco      String
-  cep           String
-  restauranteId Int              @map("restaurante_id")
-  restaurante   Restaurante      @relation(fields: [restauranteId], references: [id], onDelete: Cascade)
-  produtos      EstoqueProduto[]
+  @@id([restauranteId, funcionarioId])
 }
 
 model Produto {
-  id          Int               @id @default(autoincrement())
-  nome        String
-  preco       Decimal           @db.Decimal(10, 2)
-  estoques    EstoqueProduto[]
-  mapeamentos MapeamentoApp[]
-  syncLogs    EstoqueSyncLog[]
-  itensPedido ItemPedido[]
-}
-
-model EstoqueProduto {
-  id         Int     @id @default(autoincrement())
-  estoqueId  Int     @map("estoque_id")
-  produtoId  Int     @map("produto_id")
-  quantidade Int
-  estoque    Estoque @relation(fields: [estoqueId], references: [id], onDelete: Cascade)
-  produto    Produto @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+  id            Int              @id @default(autoincrement())
+  nome          String
+  preco         Decimal          @db.Decimal(10, 2)
+  restauranteId Int              @map("restaurante_id")
+  restaurante   Restaurante      @relation(fields: [restauranteId], references: [id], onDelete: Cascade)
+  mapeamentos   MapeamentoApp[]
+  syncLogs      EstoqueSyncLog[]
+  itensPedido   ItemPedido[]
 }
 
 model MapeamentoApp {
@@ -130,9 +103,22 @@ model EstoqueSyncLog {
   produto       Produto  @relation(fields: [produtoId], references: [id], onDelete: Cascade)
 }
 
+model Cliente {
+  id          Int      @id @default(autoincrement())
+  nomeCliente String   @map("nome_cliente")
+  endereco    String
+  telefone    String?
+  email       String?
+  cpf         String?  @unique
+  criadoEm    DateTime @default(now()) @map("criado_em")
+  pedidos     Pedido[]
+}
+
 model Pedido {
   id              Int          @id @default(autoincrement())
-  nomeCliente     String       @map("nome_cliente")
+  nomeCliente     String?      @map("nome_cliente") // Add este campo
+  clienteId       Int?         @map("cliente_id")
+  cliente         Cliente?     @relation(fields: [clienteId], references: [id])
   preco           Decimal      @db.Decimal(10, 2)
   metodoPagamento String       @map("metodo_pagamento")
   app             String
@@ -146,12 +132,13 @@ model Pedido {
 }
 
 model ItemPedido {
-  id         Int     @id @default(autoincrement())
   pedidoId   Int     @map("pedido_id")
   produtoId  Int     @map("produto_id")
   quantidade Int
   pedido     Pedido  @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
   produto    Produto @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+
+  @@id([pedidoId, produtoId])
 }
 
 model Entrega {

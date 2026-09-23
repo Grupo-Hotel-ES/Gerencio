@@ -1,0 +1,2407 @@
+openapi: 3.0.0
+info:
+  title: 滴滴国际化外卖开放平台
+  description: 滴滴国际化外卖开放平台开发者文档
+  termsOfService: 'https://openapi.didi-food.com/terms'
+  contact:
+    email: didiOpenApiSupport@didiglobal.com
+  version: 0.0.1
+servers:
+  -
+    url: 'https://openapi.didi-food.com'
+    description: 'OpenApi host'
+paths:
+  /v1/auth/authorizationpage/getUrl:
+    post:
+      tags:
+        - Auth
+      summary: 'Get Authorization Web Page'
+      description: 'The Get Authorization Web Page endpoint provides the developer the ability to get DiDi''s bind store self-service web page.'
+      operationId: 'B\Controller\V1\Auth\Authorizationpage::getUrlAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - app_id
+                - app_shop_id
+              properties:
+                app_id:
+                  description: 'ID for an app on Didi-food.'
+                  type: integer
+                  example: '3458764610605350993'
+                app_shop_id:
+                  description: menus.
+                  type: string
+                  example: '1234'
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: string, example: ['https://didi-food.com/en-US/store/ui-sdk/authorization?appId=5764607636157235207&appShopId=aaa'] } }, type: object }
+  /v1/auth/authtoken/get:
+    get:
+      tags:
+        - Auth
+      summary: 'Get AuthToken'
+      description: 'This api provides the ability to get the auth token for the shop specified with app_shop_id. If you don''t have a auth token yet or the auth token expired, please call auth/authtoken/refresh api first.'
+      operationId: 'B\Controller\V1\Auth\Authtoken::getAction'
+      parameters:
+        -
+          name: app_id
+          in: query
+          description: 'ID for an app on Didi-food.'
+          required: true
+          schema:
+            type: integer
+        -
+          name: app_secret
+          in: query
+          description: 'The secret key for app_id.'
+          required: true
+          schema:
+            type: string
+            maxLength: 50
+            minLength: 1
+        -
+          name: app_shop_id
+          in: query
+          description: 'ID for an shop on your system.'
+          required: true
+          schema:
+            type: string
+            maxLength: 255
+            minLength: 1
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, properties: { app_id: { description: 'ID for an app on Didi-food.', type: integer }, app_shop_id: { description: 'ID for an shop on your system.', type: string }, auth_token: { description: 'The secret key for the shop.', type: string }, token_expiration_time: { description: 'The expiration time of the auth token. If the auth token expired, you can create another with auth/authtoken/refresh api.', type: integer } }, type: object } }, type: object }
+  /v1/auth/authtoken/refresh:
+    get:
+      tags:
+        - Auth
+      summary: 'Refresh AuthToken'
+      description: 'This api always generate a new token, and you need to get it with auth/authtoken/get api'
+      operationId: 'B\Controller\V1\Auth\Authtoken::refreshAction'
+      parameters:
+        -
+          name: app_id
+          in: query
+          description: 'ID for an app on Didi-food.'
+          required: true
+          schema:
+            type: integer
+        -
+          name: app_secret
+          in: query
+          description: 'The secret key for app_id.'
+          required: true
+          schema:
+            type: string
+            maxLength: 50
+            minLength: 1
+        -
+          name: app_shop_id
+          in: query
+          description: 'ID for an shop on your system.'
+          required: true
+          schema:
+            type: string
+            maxLength: 255
+            minLength: 1
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: boolean, default: true } }, type: object }
+  /v1/item/item/upload:
+    post:
+      tags:
+        - Item
+      summary: 'Upload Store Menu'
+      description: "This api will upload the menu to the store, and you can verify the result with [Get store menu details](#Get Store Menu Details) api.\n\n     *  support content_with_sub_item in item, but will ignore content_with_sub_item in sub_item"
+      operationId: 'B\Controller\V1\Item\Item::uploadAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - menus
+                - categories
+                - items
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ODQ5ZDBkZDdjN2Q1NzM4NzcxNTM3Mjg3ODNjMzRhMmE=
+                menus:
+                  description: menus.
+                  type: array
+                  items: { $ref: '#/components/schemas/MenuStruct' }
+                categories:
+                  description: categories.
+                  type: array
+                  items: { $ref: '#/components/schemas/CateStruct' }
+                items:
+                  description: items.
+                  type: array
+                  items: { $ref: '#/components/schemas/ItemStruct' }
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: array, items: { type: string }, example: ['3458764778045113577', '3458764778162554089'] } }, type: object }
+  /v1/item/item/uploadV2:
+    post:
+      tags:
+        - Item
+      summary: 'Upload Store Menu v2'
+      description: "This api support multi level item, and it will return immediately with a taskId and upload the menu with an async task in background,\n     *     with the task id you can call the item/item/getMenuTaskInfo to get the detail.\n     *     And you will also receive a callback with event uploadMenuTaskStatus when the task finished in background.\n     *     After the api is successfully called, please call the item/item/list api to check the upload result.\n\n     *  support nest of content_with_sub_item for no more than six level"
+      operationId: 'B\Controller\V1\Item\Item::uploadV2Action'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - menus
+                - categories
+                - items
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ODQ5ZDBkZDdjN2Q1NzM4NzcxNTM3Mjg3ODNjMzRhMmE=
+                menus:
+                  description: menus.
+                  type: array
+                  items: { $ref: '#/components/schemas/MenuStruct' }
+                categories:
+                  description: categories.
+                  type: array
+                  items: { $ref: '#/components/schemas/CateStruct' }
+                items:
+                  description: items.
+                  type: array
+                  items: { $ref: '#/components/schemas/ItemStruct' }
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: object, items: { $ref: '#/components/schemas/TaskInfo' } } }, type: object }
+  /v1/item/item/getMenuTaskInfo:
+    get:
+      tags:
+        - Item
+      summary: 'Get Store Menu Status'
+      description: 'This api provides the ability to query the menu upload status of uploadV2.'
+      operationId: 'B\Controller\V1\Item\Item::getMenuTaskInfoAction'
+      parameters:
+        -
+          name: auth_token
+          in: query
+          description: 'The secret key for the shop.'
+          required: true
+          schema:
+            type: string
+        -
+          name: task_id
+          in: query
+          description: 'The task id return in item/item/uploadV2.'
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: 'Get Store Menu Upload Status', type: object, allOf: [{ $ref: '#/components/schemas/TaskInfo' }, { properties: { operationList: { description: 'operation aggregate info List', type: array, items: { $ref: '#/components/schemas/UploadMenuAggregateOperationInfo' } } }, type: object }, { properties: { appShopID: { description: 'Get Store Menu Upload Status', type: string } }, type: object }] } }, type: object }
+  /v1/item/item/list:
+    get:
+      tags:
+        - Item
+      summary: 'Get Store Menu Details'
+      description: 'This Get Store Menu Details endpoint provides the ability to get the menu.'
+      operationId: 'B\Controller\V1\Item\Item::listAction'
+      parameters:
+        -
+          name: auth_token
+          in: query
+          description: 'The secret key for the shop.'
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: 'Get Store Menu Details', properties: { menus: { description: 'List of the store’s menus. Currently, only one menu is supported. Multiple menus need to be mapped to 1 menu. Multiple menus shall be mapped to 1 menu, categories’ sequence shall be uploaded in accordance to the categories’ sequence, need to make sure that the categories’ sequence is correct.', type: array, items: { $ref: '#/components/schemas/MenuStruct' } }, categories: { description: 'List of the store’s menu categories. Currently, one category can only belong to one menu. The sequence of the items under the same category must be uploaded in the same sequence. Please make sure that the item sequence is correct.', type: array, items: { $ref: '#/components/schemas/CateStruct' } }, items: { description: 'List of the store’s items.Current item can only belong to one category or no category. The sequence of the content under the same item must be uploaded in the same sequence. Please make sure that the content sequence is correct.', type: array, items: { $ref: '#/components/schemas/ItemStruct' } } }, type: object } }, type: object }
+  /v1/item/item/update:
+    post:
+      tags:
+        - Item
+      summary: 'Update One Item'
+      description: 'This update one item endpoint provides the ability to update items.'
+      operationId: 'B\Controller\V1\Item\Item::updateAction'
+      parameters:
+        -
+          name: auth_token
+          in: query
+          description: 'The secret key for the shop.'
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ItemStruct'
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: boolean, default: true } }, type: object }
+  /v1/item/item/updateItemStatus:
+    post:
+      tags:
+        - Item
+      summary: 'Update Item Status'
+      description: 'This update one item endpoint provides the ability to update item status.'
+      operationId: 'B\Controller\V1\Item\Item::updateItemStatusAction'
+      parameters:
+        -
+          name: auth_token
+          in: query
+          description: 'The secret key for the shop.'
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - app_item_id
+                - status
+              properties:
+                app_item_id:
+                  description: 'ID for the item, provided by the restaurant or POS.Map directly.'
+                  type: string
+                  example: Hamburguesas01
+                status:
+                  description: 'status:1:available;2:Unavailable.'
+                  type: integer
+                  example: 1
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: boolean, default: true } }, type: object }
+  /v1/order/apply/cancel:
+    post:
+      tags:
+        - Order
+      summary: 'agree or refuse customer''s apply to cancel an order when accept by the shop'
+      description: 'This api allows developer to agree or refuse a cancel apply'
+      operationId: 'B\Controller\V1\Order\Apply::cancelAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - order_id
+                - apply_id
+                - agree
+                - reason_id
+                - reason
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+                order_id:
+                  description: 'id of the order'
+                  type: integer
+                  example: 2352921557674426622
+                apply_id:
+                  description: 'id of the apply'
+                  type: integer
+                  example: 2352921557674426621
+                agree:
+                  description: 'agree if it is true, or refuse'
+                  type: boolean
+                  example: true
+                reason:
+                  description: 'refuse reason'
+                  type: string
+                  example: 'already prepared'
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, properties: { '': {  } }, type: object } }, type: object }
+  /v1/order/apply/refund:
+    post:
+      tags:
+        - Order
+      summary: 'agree or refuse customer''s apply to refund of an order when missing items after it finished'
+      description: 'This api allows developer to agree or refuse a refund apply'
+      operationId: 'B\Controller\V1\Order\Apply::refundAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - order_id
+                - agree
+                - apply_id
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+                order_id:
+                  description: 'id of the order'
+                  type: integer
+                  example: 2352921557674426622
+                apply_id:
+                  description: 'id of the apply'
+                  type: integer
+                  example: 2352921557674426621
+                agree:
+                  description: 'agree if it is true, or refuse'
+                  type: boolean
+                  example: true
+                custom_reason:
+                  description: 'custom refuse reason'
+                  type: string
+                  example: 'already prepare'
+                base_reason_id:
+                  description: 'pick from reason list'
+                  type: string
+                  example: 'already prepare'
+                base_reason:
+                  description: 'pick from reason list'
+                  type: string
+                  example: 'already prepare'
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: object } }, type: object }
+  /v1/order/order/detail:
+    get:
+      tags:
+        - Order
+      summary: 'Get Order Details'
+      description: 'This Get Order Details endpoint allows a developer pull the order details.'
+      operationId: 'B\Controller\V1\Order\Order::detailAction'
+      parameters:
+        -
+          name: auth_token
+          in: query
+          description: 'The secret key for the shop.'
+          required: true
+          schema:
+            type: string
+        -
+          name: order_id
+          in: query
+          description: 'ID for an order on Didi-food.'
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { $ref: '#/components/schemas/OrderModel' } }, type: object }
+  /v1/order/order/confirm:
+    post:
+      tags:
+        - Order
+      summary: 'Confirm Order'
+      description: 'This Confirm Order endpoint allows a developer to confirm the order.'
+      operationId: 'B\Controller\V1\Order\Order::confirmAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - order_id
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+                order_id:
+                  description: 'ID for order on Didi-food.'
+                  type: integer
+                  example: 2352921557674426622
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: boolean, default: true } }, type: object }
+  /v1/order/order/cancel:
+    post:
+      tags:
+        - Order
+      summary: 'Cancel Order'
+      description: 'This Cancel Order endpoint allows a developer to cancel the order.'
+      operationId: 'B\Controller\V1\Order\Order::cancelAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - order_id
+                - reason_id
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+                order_id:
+                  description: 'ID for order on Didi-food.'
+                  type: integer
+                  example: 2352921557674426622
+                reason_id:
+                  description: "An object that contains detailed information about rejected orders.\n                            enums: 1010,1020,1030,1040,1050,1060,1080"
+                  type: integer
+                  example: 1010
+                reason:
+                  description: 'Reasons or precautions for rejection.'
+                  type: string
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: boolean, default: true } }, type: object }
+  /v1/order/order/ready:
+    get:
+      tags:
+        - Order
+      summary: 'Order Ready'
+      description: 'The Order Ready endpoint allows the developer to indicate that the meal is prepared.'
+      operationId: 'B\Controller\V1\Order\Order::readyAction'
+      parameters:
+        -
+          name: auth_token
+          in: query
+          description: 'The secret key to the shop.'
+          required: true
+          schema:
+            type: string
+        -
+          name: order_id
+          in: query
+          description: 'The id of the order.'
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+  /v1/order/order/delivered:
+    get:
+      tags:
+        - Order
+      summary: 'Order Delivered'
+      description: 'The Order Delivered endpoint allows the developer to indicate that the delivery has been completed. Only used for self-delivery orders.'
+      operationId: 'B\Controller\V1\Order\Order::deliveredAction'
+      parameters:
+        -
+          name: auth_token
+          in: query
+          description: 'The secret key to the shop.'
+          required: true
+          schema:
+            type: string
+        -
+          name: order_id
+          in: query
+          description: 'The id of the order.'
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+  /v1/shop/apply/set:
+    post:
+      tags:
+        - Shop
+      summary: 'set whether receive notifications of customer''s apply to cancel an order when accept by the shop or refund when missing items in an order after it finished'
+      description: 'This api allows developer to set whether receive cancel apply or refund apply notifications. By default, didi cs team will take charge of these issues.'
+      operationId: 'B\Controller\V1\Shop\Apply::setAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - receive_cancel_apply
+                - receive_refund_apply
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+                receive_cancel_apply:
+                  description: 'set to receive cancel apply notification; 0 not receive, 1 receive'
+                  type: integer
+                  example: 1
+                receive_refund_apply:
+                  description: 'set to receive refund apply notification; 0 not receive, 1 receive'
+                  type: integer
+                  example: 1
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: object } }, type: object }
+  /v1/shop/deliveryArea/add:
+    post:
+      tags:
+        - DeliveryArea
+      summary: 'add delivery area for shop'
+      description: 'This api allows developer to add delivery area conf.'
+      operationId: 'B\Controller\V1\Shop\Deliveryarea::addAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - area_type
+                - avg_delivery_eta
+                - enable_time_list
+                - price
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+                area_type:
+                  description: 'draw a circle delivery area with the shop as center by radius or draw a polygon with points,  0: circle, 1: polygon'
+                  type: integer
+                  example: 0
+                radius:
+                  description: 'required when areaType is circle'
+                  type: integer
+                  example: 5
+                points:
+                  description: 'required when areaType is polygon'
+                  type: array
+                  items: { $ref: '#/components/schemas/POI' }
+                  example: 5
+                avg_delivery_eta:
+                  description: 'seconds of average delivery eta'
+                  type: integer
+                  example: 300
+                enable_time_list:
+                  description: ''
+                  type: array
+                  items: { $ref: '#/components/schemas/EnableTime' }
+                price:
+                  description: 'set in the lowest denomination (e.g., cents for MX currency, not Peso).'
+                  type: integer
+                  example: 500
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, properties: { area_id_list: { description: 'id of the created delivery area', type: array, items: { type: integer } } }, type: object } }, type: object }
+  /v1/shop/deliveryArea/list:
+    get:
+      tags:
+        - DeliveryArea
+      summary: 'get all delivery area for shop'
+      description: 'This api allows developer to get all delivery area conf.'
+      operationId: 'B\Controller\V1\Shop\Deliveryarea::listAction'
+      parameters:
+        -
+          name: auth_token
+          in: query
+          description: 'The secret key for the shop.'
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: object } }, type: object }
+  /v1/shop/deliveryArea/update:
+    post:
+      tags:
+        - DeliveryArea
+      summary: 'update delivery area for shop'
+      description: 'This api allows developer to update delivery area conf.'
+      operationId: 'B\Controller\V1\Shop\Deliveryarea::updateAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - area_id_list
+                - areaType
+                - avg_delivery_eta
+                - enable_time_list
+                - price
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+                area_id_list:
+                  description: 'area id list, you can get them from deliveryArea/list endpoint'
+                  type: array
+                  items: { type: integer }
+                areaType:
+                  description: 'draw a circle delivery area with the shop as center by radius or draw a polygon with points,  0: circle, 1: polygon'
+                  type: integer
+                  example: 0
+                radius:
+                  description: 'required when areaType is circle'
+                  type: integer
+                  example: 5
+                points:
+                  description: 'required when areaType is polygon'
+                  type: array
+                  items: { $ref: '#/components/schemas/POI' }
+                  example: 5
+                avg_delivery_eta:
+                  description: 'seconds of average delivery eta'
+                  type: integer
+                  example: 300
+                enable_time_list:
+                  description: ''
+                  type: array
+                  items: { $ref: '#/components/schemas/EnableTime' }
+                price:
+                  description: 'set in the lowest denomination (e.g., cents for MX currency, not Peso).'
+                  type: integer
+                  example: 500
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+  /v1/shop/deliveryArea/delete:
+    post:
+      tags:
+        - DeliveryArea
+      summary: 'delete delivery area for shop'
+      description: 'This api allows developer to delete delivery area conf.'
+      operationId: 'B\Controller\V1\Shop\Deliveryarea::deleteAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - area_id_list
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+                area_id_list:
+                  description: 'area id list, you can get them from deliveryArea/list endpoint'
+                  type: array
+                  items: { type: integer }
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+  /v1/shop/deliveryArea/update4pizzacooc:
+    post:
+      tags:
+        - DeliveryArea
+      summary: 'only update price and avg_delivery_eta for shop'
+      description: 'This api allows developer to update price and avg_delivery_eta without other params of all delivery area conf.'
+      operationId: 'B\Controller\V1\Shop\Deliveryarea::update4pizzacoocAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - avg_delivery_eta
+                - price
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+                avg_delivery_eta:
+                  description: 'seconds of average delivery eta'
+                  type: integer
+                  example: 300
+                price:
+                  description: 'set in the lowest denomination (e.g., cents for MX currency, not Peso).'
+                  type: integer
+                  example: 500
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+  /v1/shop/shop/detail:
+    get:
+      tags:
+        - Shop
+      summary: 'Get Shop Details'
+      description: 'This Get Shop Details endpoint allows a developer to pull the shop details.'
+      operationId: 'B\Controller\V1\Shop\Shop::detailAction'
+      parameters:
+        -
+          name: auth_token
+          in: query
+          description: 'The secret key for the shop.'
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { $ref: '#/components/schemas/ShopModel' } }, type: object }
+  /v1/shop/shop/list:
+    post:
+      tags:
+        - Shop
+      summary: 'List All Stores'
+      description: 'The List All Stores endpoint retrieves the stores binded to your application.'
+      operationId: 'B\Controller\V1\Shop\Shop::listAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - app_id
+                - timestamp
+                - sign
+              properties:
+                app_id:
+                  description: 'The ID of an app in our system.'
+                  type: integer
+                  example: '3458764610605350993'
+                timestamp:
+                  description: 'Timestamp of the request.'
+                  type: integer
+                  example: '1600334446'
+                sign:
+                  description: 'Signature generated as explained above.'
+                  type: string
+                  example: 23a3170ae0104c7d1cc3061b29f1138f
+                page_no:
+                  description: 'Page number.'
+                  type: integer
+                  example: '1'
+                page_size:
+                  description: 'Page size. Max: 100.'
+                  type: integer
+                  example: '30'
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: object } }, type: object }
+  /v1/shop/shop/unbind:
+    post:
+      tags:
+        - Shop
+      summary: 'Unbind Store'
+      description: 'The Unbind Store endpoints give you the ability to unbind a store to your app when needed, without having to ask it for DiDi’s team.'
+      operationId: 'B\Controller\V1\Shop\Shop::unbindAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+              properties:
+                auth_token:
+                  description: 'The auth_token for the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: boolean, example: 'true' } }, type: object }
+  /v1/shop/shop/setStatus:
+    post:
+      tags:
+        - Shop
+      summary: 'Set Shop Status And Online-Switch'
+      description: 'This api allows developer to set the shop''s biz_status and online-switch. If biz_status is offline, this shop will never be online until the biz_status set to online with this api or be online from didi''s app manually. Online switch will only be enabled when biz_status is online.'
+      operationId: 'B\Controller\V1\Shop\Shop::setStatusAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - biz_status
+                - auto_switch
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+                biz_status:
+                  description: 'Business status:1 online,2 offline'
+                  type: integer
+                  example: 1
+                auto_switch:
+                  description: 'if biz_status is offline, it will be disabled no matter what the value is, it only enabled when biz_status is online. 1 for set store online automatically, order release is enabled.2 for set store offline automatically, order release is closed.3 for set store online and offline automatically，order release is enabled.'
+                  type: integer
+                  example: 1
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, properties: { biz_status: { description: 'true if biz_status is online, false if offline', type: boolean, example: true }, auto_switch: { description: 'true if auto_switch is enabled, false if disabled', type: boolean, example: true } }, type: object } }, type: object }
+  /v1/shop/shop/update:
+    post:
+      tags:
+        - Shop
+      summary: 'Update Shop Basic Information'
+      description: 'This Update Shop Basic Infomation endpoint allows a developer to update the shop''s basic information: shop logo, shop images, phone, business hours, and mealtime.'
+      operationId: 'B\Controller\V1\Shop\Shop::updateAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - shop_phone
+                - biz_day_time
+                - promise_produce_time
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+                shop_phone:
+                  description: ''
+                  type: string
+                  example: '[{"callingCode":52,"phone":15011498822,"type":0}]'
+                biz_day_time:
+                  description: ''
+                  type: string
+                  example: '[{"bizDay":[1,2,3,4,5,6,7],"bizTime":[{"begin":"00:00","end":"23:59"}]}]'
+                promise_produce_time:
+                  description: 'The average amount of time preparing an order takes, in minutes.'
+                  type: integer
+                  example: 180
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, properties: { shop_phone: { description: 'The result of setting the shop_phone.', type: boolean, example: true }, biz_day_time: { description: 'The result of setting the biz_day_time.', type: boolean, example: true }, promise_produce_time: { description: 'The result of setting the promise_produce_time.', type: boolean, example: true } }, type: object } }, type: object }
+  /v1/shop/shop/setconfirmmethod:
+    post:
+      tags:
+        - Shop
+      summary: 'Set Shop Confirmmethod'
+      description: 'This API allows the developer to set the shop''s order_confirm_method. If order_confirm_method is BAPP, both DiDi/99 Food''s APP and your POS system can confirm new orders, but DiDi/99 Food''s  APP must remain online. If order_confirm_method is OPENAPI, Only your POS system can confirm new orders, and the DiDi/99 Food''s APP does not need to be online. If the store is unbound, we will change the ordering method to BAPP by default.'
+      operationId: 'B\Controller\V1\Shop\Shop::setconfirmmethodAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - order_confirm_method
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+                order_confirm_method:
+                  description: 'Shop confirmmethod:1 BAPP ,2 OPENAPI'
+                  type: integer
+                  example: 1
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, properties: { order_confirm_method: { description: 'true if set successfully, false if failed', type: boolean, example: true } }, type: object } }, type: object }
+  /v1/shop/shop/validCategories:
+    post:
+      tags:
+        - Shop
+      summary: 'Get Store Categories'
+      description: 'The Get Shop Categories endpoint brings all valid categories a developer can use when updating a store basic information.'
+      operationId: 'B\Controller\V1\Shop\Shop::validCategoriesAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+              properties:
+                auth_token:
+                  description: 'The auth_token for the shop.'
+                  type: string
+                  example: ZGQ5ZjVlZGUyYmFhNDM2ZmE0ZDA5OTE5ZjI1YzBhNjU=
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, properties: { categories: { description: 'Categories of the shop.', type: array, items: { $ref: '#/components/schemas/CategoryModel' } } }, type: object } }, type: object }
+  /v3/image/image/uploadImage:
+    post:
+      tags:
+        - Shop
+      summary: 'Upload Image'
+      description: 'The Upload Image endpoint provides the ability to upload image to our storage services, which could improve the efficiency by reducing the number of times while uploading image.'
+      operationId: 'B\Controller\V3\Image\Image::uploadImageAction'
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              required:
+                - auth_token
+              properties:
+                auth_token:
+                  description: 'The auth_token for the shop.'
+                  type: string
+                image_file:
+                  description: 'The original image file.'
+                  type: object
+                image_url:
+                  description: 'The url of image file.'
+                  type: string
+                ext:
+                  description: 'The description or remark which can help you to differentiate the image.'
+                  type: string
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: object } }, type: object }
+  /v3/image/image/getImageUploadInfoPageList:
+    post:
+      tags:
+        - Shop
+      summary: 'Get Image Url List'
+      description: 'The Get Image Url List endpoint provides the ability to get the image urls on our storage services which were uploaded by Upload Image endpoint.'
+      operationId: 'B\Controller\V3\Image\Image::getImageUploadInfoPageListAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+              properties:
+                auth_token:
+                  description: 'The auth_token for the shop.'
+                  type: string
+                current_page:
+                  description: 'The page number which you want to get.'
+                  type: integer
+                page_size:
+                  description: 'The number of record which you want to get in every page.'
+                  type: string
+                gift_url:
+                  description: 'The field of giftUrl which returned by Upload Image endpoint.'
+                  type: string
+                ext:
+                  description: 'The description or remark which can help you to differentiate the image.'
+                  type: string
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: object } }, type: object }
+  /v3/item/item/upload:
+    post:
+      tags:
+        - Item
+      summary: 'Upload Store Menu v3'
+      description: 'recommend API to upload store menu, use item and modifier group.'
+      operationId: 'B\Controller\V3\Item\Item::uploadAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+                - auth_token
+                - menus
+                - categories
+                - items
+                - modifier_groups
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ODQ5ZDBkZDdjN2Q1NzM4NzcxNTM3Mjg3ODNjMzRhMmE=
+                menus:
+                  description: menus.
+                  type: array
+                  items: { $ref: '#/components/schemas/MenuStruct' }
+                categories:
+                  description: categories.
+                  type: array
+                  items: { $ref: '#/components/schemas/CateStruct' }
+                items:
+                  description: items.
+                  type: array
+                  items: { $ref: '#/components/schemas/UploadV3ItemStruct' }
+                modifier_groups:
+                  description: modifier_groups.
+                  type: array
+                  items: { $ref: '#/components/schemas/UploadV3MgStruct' }
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: data, type: object, items: { $ref: '#/components/schemas/TaskInfo' } } }, type: object }
+  /v3/item/item/list:
+    get:
+      tags:
+        - Item
+      summary: 'Get Store Menu Details'
+      description: 'This Get Store Menu Details endpoint provides the ability to get the menu.'
+      operationId: 'B\Controller\V3\Item\Item::listAction'
+      parameters:
+        -
+          name: auth_token
+          in: query
+          description: 'The secret key for the shop.'
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { data: { description: 'Get Store Menu Details', properties: { menus: { description: 'List of the store’s menus. Currently, only one menu is supported. Multiple menus need to be mapped to 1 menu. Multiple menus shall be mapped to 1 menu, categories’ sequence shall be uploaded in accordance to the categories’ sequence, need to make sure that the categories’ sequence is correct.', type: array, items: { $ref: '#/components/schemas/MenuStruct' } }, categories: { description: 'List of the store’s menu categories. Currently, one category can only belong to one menu. The sequence of the items under the same category must be uploaded in the same sequence. Please make sure that the item sequence is correct.', type: array, items: { $ref: '#/components/schemas/CateStruct' } }, items: { description: 'List of the store’s items.Current item can only belong to one category or no category. The sequence of the content under the same item must be uploaded in the same sequence. Please make sure that the content sequence is correct.', type: array, items: { $ref: '#/components/schemas/UploadV3ItemStruct' } }, modifier_groups: { description: 'List of the store’s modifier groups.', type: array, items: { $ref: '#/components/schemas/UploadV3MgStruct' } } }, type: object } }, type: object }
+  /v3/item/item/updateItem:
+    post:
+      tags:
+        - Item
+      summary: 'Update Item V3'
+      description: 'update a single item'
+      operationId: 'B\Controller\V3\Item\Item::updateItemAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+                -
+                  $ref: '#/components/schemas/UploadV3ItemStruct'
+                -
+                  properties: { auth_token: { description: 'The secret key to the shop.', type: string, example: ODQ5ZDBkZDdjN2Q1NzM4NzcxNTM3Mjg3ODNjMzRhMmE= } }
+                  type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+  /v3/item/item/updateModifierGroup:
+    post:
+      tags:
+        - Item
+      summary: 'Update Modifier Group V3'
+      description: 'update a single modifier group'
+      operationId: 'B\Controller\V3\Item\Item::updateModifierGroupAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+                -
+                  $ref: '#/components/schemas/UploadV3MgStruct'
+                -
+                  properties: { auth_token: { description: 'The secret key to the shop.', type: string, example: ODQ5ZDBkZDdjN2Q1NzM4NzcxNTM3Mjg3ODNjMzRhMmE= } }
+                  type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+  /v3/item/item/updateItemStatus:
+    post:
+      tags:
+        - Item
+      summary: 'Update Item Status V3'
+      description: 'update a single item status'
+      operationId: 'B\Controller\V3\Item\Item::updateItemStatusAction'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                auth_token:
+                  description: 'The secret key to the shop.'
+                  type: string
+                  example: ODQ5ZDBkZDdjN2Q1NzM4NzcxNTM3Mjg3ODNjMzRhMmE=
+                app_item_ids:
+                  description: 'app_item_id list'
+                  type: array
+                  items: { $ref: string }
+                status:
+                  description: '1: online, 2: offline'
+                  type: integer
+              type: object
+      responses:
+        '200':
+          description: 'successful operation'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/StandardResponse' }
+                  - { properties: { success: { description: 'success app_item_id list', type: array, items: { $ref: string } }, failed: { description: 'failed app_item_id list', type: array, items: { $ref: string } } }, type: object }
+components:
+  schemas:
+    TaskInfo:
+      title: 'task model'
+      description: TaskInfo
+      required:
+        - taskID
+        - createTime
+        - status
+        - message
+      properties:
+        taskID:
+          description: 'used in item/item/getMenuTaskInfo and callback api with event menuUploadStatus'
+          type: integer
+          example: 3458764695188406330
+        createTime:
+          description: 'create time of the task'
+          type: integer
+          example: 1608273772
+        status:
+          description: 'task status; 0:waiting; 1:success; 2:failed; 3:waitRetry 4:running'
+          type: integer
+          example: 0
+        message:
+          description: 'desc of status'
+          type: string
+          example: waiting
+      type: object
+    UploadMenuAggregateOperationInfo:
+      title: 'operation aggregate info'
+      description: UploadMenuAggregateOperationInfo
+      properties:
+        operationType:
+          description: 'menuCreate, menuUpdate, cateCreate, cateUpdate, cateDel, itemCreate, itemUpdate, itemDel, imageUrlCheck, itemSoldInfoIntl, itemSoldInfo'
+          type: string
+        successList:
+          description: 'success operation id, appMenuID, appCateID, appItemID, etc...'
+          type: array
+          items:
+            type: string
+        failedList:
+          description: ''
+          type: array
+          items:
+            $ref: '#/components/schemas/UploadMenuOperationInfo'
+      type: object
+    UploadMenuOperationInfo:
+      title: 'operation info'
+      description: UploadMenuOperationInfo
+      properties:
+        operationType:
+          description: 'menuCreate, menuUpdate, cateCreate, cateUpdate, cateDel, itemCreate, itemUpdate, itemDel, imageUrlCheck, itemSoldInfoIntl, itemSoldInfo'
+          type: string
+        status:
+          description: '0 failed'
+          type: integer
+        message:
+          description: 'error for current operation'
+          type: string
+        createTime:
+          description: 'operation time'
+          type: integer
+        menuID:
+          description: 'Get Store Menu Upload Status'
+          type: integer
+        appMenuID:
+          description: 'Get Store Menu Upload Status'
+          type: string
+        menuName:
+          description: 'Get Store Menu Upload Status'
+          type: string
+        categoryID:
+          description: 'Get Store Menu Upload Status'
+          type: integer
+        appCategoryID:
+          description: 'Get Store Menu Upload Status'
+          type: string
+        categoryName:
+          description: 'Get Store Menu Upload Status'
+          type: string
+        itemID:
+          description: 'Get Store Menu Upload Status'
+          type: integer
+        appItemID:
+          description: 'Get Store Menu Upload Status'
+          type: string
+        itemName:
+          description: 'Get Store Menu Upload Status'
+          type: string
+        itemImageURL:
+          description: 'Get Store Menu Upload Status'
+          type: string
+      type: object
+    POI:
+      title: poi
+      description: 'lat and lng of a location'
+      required:
+        - lat
+        - lng
+      properties:
+        lat:
+          type: number
+          example: 33.670702244105
+        lng:
+          type: number
+          example: 135.5216506
+      type: object
+    EnableTime:
+      title: 'enable time'
+      description: 'valid time for delivery area'
+      required:
+        - start
+        - end
+      properties:
+        start:
+          type: string
+          example: '10:50'
+        end:
+          type: string
+          example: '14:00'
+      type: object
+    AreaGroup:
+      title: 'area group'
+      description: 'delivery area list'
+      properties:
+        area_id_list:
+          type: array
+          items:
+            type: integer
+        create_ts:
+          type: integer
+          example: 1628164699
+        area_index:
+          type: integer
+          example: 0
+        avg_delivery_eta:
+          type: integer
+          example: 400
+        enable_time_list:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnableTime'
+        display_enable_times:
+          type: string
+          example: '11:50-12:00'
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/POI'
+        price:
+          type: integer
+          example: 400
+        radius:
+          type: integer
+          example: 0
+      type: object
+    UploadV3ItemStruct:
+      title: 'item struct'
+      description: 'item struct for upload v3'
+      required:
+        - app_item_id
+        - item_name
+        - price
+        - is_sold_separately
+      properties:
+        app_item_id:
+          description: 'ID for the item, provided by the restaurant or POS. Map directly.'
+          type: string
+          example: '1001_001'
+        app_external_id:
+          description: 'Reserved for the restaurant’s use, e.g. for POS integrations.'
+          type: string
+          example:
+            key: value
+        item_name:
+          description: 'Item name to be displayed. The length is limited to 50.'
+          type: string
+          maxLength: 50
+          example: sandwich
+        short_desc:
+          description: 'An optional description for the Category. The length is limited to 300.'
+          type: string
+          maxLength: 300
+          example: 'very very delicious'
+        head_img:
+          description: 'The image url, char length <= 300'
+          type: string
+          example: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Ruben_sandwich.jpg/600px-Ruben_sandwich.jpg'
+        sold_info_intl:
+          type: array
+          items:
+            $ref: '#/components/schemas/SoldInfoIntl'
+        price:
+          description: 'set in the lowest denomination (e.g., cents for MX currency, not Peso)'
+          type: integer
+        is_sold_separately:
+          description: 'show in didi food app as root item if it''s true, or only display when it is contains by some modifier group'
+          type: boolean
+      type: object
+    UploadV3MgStruct:
+      title: 'modifier group struct'
+      description: 'modifier group struct for upload v3'
+      required:
+        - app_modifier_group_id
+        - modifier_group_name
+        - app_mg_items
+      properties:
+        app_modifier_group_id:
+          description: 'ID for the mg, provided by the restaurant or POS.'
+          type: string
+          example: '90001'
+        app_external_id:
+          description: 'Reserved for the restaurant’s use, e.g. for POS integrations.'
+          type: string
+          example:
+            key: value
+        modifier_group_name:
+          description: 'The mg name to be displayed.The length is limited to 50.'
+          type: string
+          maxLength: 50
+          example: milk
+        is_required:
+          description: 'Is a required selection?  1 is required, 2 not required'
+          type: integer
+          example: 2
+        quantity_min_permitted:
+          description: '(optional) The minimum quantity allowed (inclusive)'
+          type: integer
+          example: 1
+        quantity_max_permitted:
+          description: '(optional) The maximum quantity allowed (inclusive)'
+          type: integer
+          example: 5
+        buy_mode:
+          description: 'buy_mode=1 means you can choose one item in this modifier group multiple times. otherwise buy_mode=0.'
+          type: integer
+          example: 0
+        app_mg_items:
+          description: 'app_item_id and price list contained by this mg'
+          type: array
+          items:
+            $ref: '#/components/schemas/AppMGItem'
+      type: object
+    AppMGItem:
+      title: poi
+      description: 'app_item_id and price, use in modifier group'
+      required:
+        - app_item_id
+      properties:
+        app_item_id:
+          description: 'ID for the item, provided by the restaurant or POS. Map directly.'
+          type: string
+          example: '1001_001'
+        price:
+          description: 'set in the lowest denomination (e.g., cents for MX currency, not Peso),'
+          type: integer
+      type: object
+    DominoAggregatorFeesModel:
+      title: 'domino aggregator fees model'
+      description: DominoAggregatorFeesModel
+      type: object
+    AppShopV2Model:
+      title: 'app_shopv2 model'
+      description: AppShopV2Model
+      properties:
+        app_id:
+          description: ''
+          type: integer
+        shop_id:
+          description: ''
+          type: integer
+        app_shop_id:
+          description: ''
+          type: string
+        city_id:
+          description: ''
+          type: integer
+        token_expiration_time:
+          description: ''
+          type: integer
+          example: '1683791603'
+      type: object
+    CustomerAddressModel:
+      title: 'receive_address model'
+      description: CustomerAddressModel
+      properties:
+        uid:
+          description: 'ID for an address on Didi-food.'
+          type: integer
+        name:
+          description: 'User''s name.'
+          type: string
+        first_name:
+          description: 'User''s first name.'
+          type: string
+        last_name:
+          description: 'User''s last name.'
+          type: string
+        calling_code:
+          description: 'Country''s telephone number.'
+          type: string
+        phone:
+          description: 'User''s phone.'
+          type: string
+        city:
+          description: 'City''s name.'
+          type: string
+        country_code:
+          description: 'Shorthand code for the country.'
+          type: string
+        poi_address:
+          description: ''
+          type: string
+        house_number:
+          description: ''
+          type: string
+        poi_lat:
+          description: 'Latitude of User''s receiver address in Google map.'
+          type: string
+        poi_lng:
+          description: 'Longitude of User''s receiver address in Google map.'
+          type: string
+        coordinate_type:
+          description: ''
+          type: string
+        poi_display_name:
+          description: ''
+          type: string
+      type: object
+    OrderItemModel:
+      title: 'order_item model'
+      description: OrderItemModel
+      properties:
+        app_item_id:
+          description: 'ID for the item, provided by the store.'
+          type: string
+        app_external_id:
+          description: 'form string/json string, provided by the store.'
+          type: string
+        name:
+          description: 'The menu title for the item.'
+          type: string
+        total_price:
+          description: 'The total cost of each line item in the cart.'
+          type: integer
+        sku_price:
+          description: 'The SKU price for the item.'
+          type: integer
+        amount:
+          description: 'Quantity of the item.'
+          type: integer
+        remark:
+          description: 'Instructions from an Eater pertaining to the preparation of this item.'
+          type: string
+        sub_item_list:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderSubItemModel'
+        promotion_detail:
+          $ref: '#/components/schemas/OrderItemPromotionModel'
+        real_price:
+          description: 'total_price - discount.'
+          type: integer
+        promo_type:
+          description: 'type of the promotion, 0: no promotion; 2: special price; 4: buy with gifts, buy x get y;'
+          type: integer
+      type: object
+    OrderItemPromotionModel:
+      title: 'item promotion model, support in product app created after Jun 1, 2021 and all test app'
+      description: OrderItemPromotionModel
+      properties:
+        promo_type:
+          description: 'promotion type. 0: no promotion; 1: reduction; 2: special price; 3: free delivery; 4: buy with gifts; 10: coupon on order; 11: coupon on dish; 12: coupon on delivery; 20: delivery deduct of member; 30:favor delivery pool discount'
+          type: integer
+        save_price:
+          description: 'the discount of this promotion'
+          type: integer
+        shop_subside_price:
+          description: 'the cost that the shop bear'
+          type: integer
+      type: object
+    OrderModel:
+      title: 'order model'
+      description: OrderModel
+      properties:
+        order_id:
+          description: 'ID for an app on Didi-food.'
+          type: integer
+        status:
+          description: 'The current state of the order.'
+          type: integer
+        shop_accept_status:
+          description: 'The current shop acceptance state of the order.'
+          type: integer
+        before_status:
+          description: 'The before step state of the order.'
+          type: integer
+        order_index:
+          description: 'Shop order number by day, starts from 1.'
+          type: integer
+        remark:
+          description: 'Instructions from an Eater pertaining to the preparation of this order.'
+          type: string
+        city_id:
+          description: ''
+          type: integer
+        country:
+          description: ''
+          type: string
+        timezone:
+          description: 'Time zone.'
+          type: string
+        pay_type:
+          description: '1:online pay; 2: cash; 3: pos(for credit card); 4: wallet(didi wallet in didi food app, also a kind of online pay.)'
+          type: integer
+        delivery_type:
+          description: '1:delivery by DiDi; 2:delivery by Store.The dining type of the order.'
+          type: integer
+        delivery_eta:
+          description: ''
+          type: integer
+        expected_cook_eta:
+          description: 'It is recommended to inform the shop prepared before this time, after this time, the rider can report the meal timeout. unit: second.'
+          type: integer
+        expected_arrived_eta:
+          description: 'The time DiDi food predicts food will be ready for delivery. unit: second.'
+          type: integer
+        create_time:
+          description: 'The time at which the order was placed, unix_timestamp.'
+          type: integer
+        pay_time:
+          description: 'The time at which the order was paid, unix_timestamp.'
+          type: integer
+        complete_time:
+          description: 'The time at which the order was completed, unix_timestamp.'
+          type: integer
+        cancel_time:
+          description: 'The time at which the order was canceled, unix_timestamp.'
+          type: integer
+        shop_confirm_time:
+          description: 'The time at which the order was confirmed by shop, unix_timestamp.'
+          type: integer
+        price:
+          $ref: '#/components/schemas/PriceModel'
+        shop:
+          $ref: '#/components/schemas/OrderShopModel'
+        receive_address:
+          $ref: '#/components/schemas/CustomerAddressModel'
+        order_items:
+          description: 'The dishes.'
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemModel'
+        promotions:
+          description: 'The promotion info.'
+          type: array
+          items:
+            $ref: '#/components/schemas/PromotionModel'
+      type: object
+    OrderShopModel:
+      title: 'shop model'
+      description: OrderShopModel
+      properties:
+        shop_id:
+          description: 'ID of the store.'
+          type: integer
+        app_shop_id:
+          description: 'ID for the shop, provided by the store.'
+          type: string
+        shop_addr:
+          description: 'The top address line of the store location.'
+          type: string
+        shop_name:
+          description: 'The name of the store. This is the same name that is displayed to eaters in the DiDi app.'
+          type: string
+        shop_phone:
+          description: 'The shop''s phone.'
+          type: array
+          items:
+            type: string
+      type: object
+    OrderSubItemModel:
+      title: 'order_subitem model'
+      description: OrderSubItemModel
+      properties:
+        app_item_id:
+          description: 'ID for the item, provided by the store.'
+          type: string
+        app_external_id:
+          description: 'not support yet'
+          type: string
+          deprecated: true
+        name:
+          description: 'The menu title for the item.'
+          type: string
+        total_price:
+          description: 'The total cost of each line item in the cart.'
+          type: integer
+        sku_price:
+          description: 'The SKU price for the item.'
+          type: integer
+        amount:
+          description: 'Quantity of the item.'
+          type: integer
+        app_content_id:
+          description: 'ID for the content, provided by the store.'
+          type: string
+        content_app_external_id:
+          description: 'form string/json string, provided by the store.'
+          type: string
+        sub_item_list:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderSubItemModel'
+      type: object
+    PriceModel:
+      title: 'price model'
+      description: PriceModel
+      properties:
+        order_price:
+          description: 'The total cost of the order price, only the original price of the dish is calculated.'
+          type: integer
+        real_price:
+          description: 'Original price of item + delivery fee payable + dynamic dispatching fee-delivery fee borne by platform activities-Merchant event discount amount.'
+          type: integer
+        real_pay_price:
+          description: 'Original price of item + delivery fee payable + dynamic dispatching fee-delivery fee borne by platform activities-Merchant event discount amount-Coupon amount.'
+          type: integer
+        delivery_price:
+          description: 'Actual delivery cost. Original delivery price + dynamic dispatching fee-delivery fee borne by platform activities- delivery discount amount of Merchant.'
+          type: integer
+        shop_paid_money:
+          description: 'Use it in Cash order, the amount that the rider needs to pay in advance to the merchant when the type is platform pay in advance, this amount is 0.'
+          type: integer
+        refund_price:
+          description: 'The total refund amount of the order.'
+          type: integer
+        currency:
+          description: 'Price of the item in the lowest local currency denomination, e.g. cents.'
+          type: string
+        items_discount:
+          description: 'The total discount of the items'
+          type: integer
+        delivery_discount:
+          description: 'The total discount of delivery'
+          type: integer
+        others_fees:
+          $ref: '#/components/schemas/OthersFees'
+        customer_need_paying_money:
+          description: 'Customer''s payment amount'
+          type: integer
+      type: object
+    OthersFees:
+      title: OthersFees
+      properties:
+        small_order_price:
+          description: 'Small order price'
+          type: integer
+        total_tip_money:
+          description: 'Total tip money'
+          type: integer
+        service_price:
+          description: 'Service price'
+          type: integer
+        coupon_discount:
+          description: 'Coupon discount'
+          type: integer
+      type: object
+    PromotionModel:
+      title: 'promotion model, support in product app created after Feb 25, 2021 and all test app'
+      description: PromotionModel
+      properties:
+        promo_type:
+          description: 'promotion type. 0: no promotion; 1: reduction; 2: special price; 3: free delivery; 4: buy with gifts; 10: coupon on order; 11: coupon on dish; 12: coupon on delivery; 20: delivery deduct of member; 30:favor delivery pool discount'
+          type: integer
+        save_price:
+          description: 'the discount of this promotion'
+          type: integer
+        shop_subside_price:
+          description: 'the cost that the shop bear'
+          type: integer
+      type: object
+    BizDayTimeModel:
+      title: 'biz_day_time model'
+      description: BizDayTimeModel
+      properties:
+        biz_day:
+          description: 'The shop''s business days.'
+          type: array
+          items:
+            type: integer
+          example:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+        biz_time:
+          description: 'business time for day.'
+          type: array
+          items:
+            $ref: '#/components/schemas/BizTimeModel'
+      type: object
+    BizHolidayTimeModel:
+      title: 'biz_day_time model'
+      description: BizholidayTimeModel
+      properties:
+        biz_holiday:
+          description: 'The holiday.'
+          type: string
+          example: '2021-02-02'
+        rest_all_day:
+          description: 'Rest all day.'
+          type: boolean
+          example: 'true'
+        biz_time:
+          description: 'business time for day.'
+          type: array
+          items:
+            $ref: '#/components/schemas/BizTimeModel'
+      type: object
+    BizTimeModel:
+      title: 'biz_time model'
+      description: BizTimeModel
+      properties:
+        begin:
+          description: 'begin time.'
+          type: string
+          example: '07:00'
+        end:
+          description: 'end time.'
+          type: string
+          example: '17:00'
+      type: object
+    CategoryModel:
+      title: 'shop category model'
+      description: CategoryModel
+      properties:
+        id:
+          description: ''
+          type: string
+          example: '200001545088714'
+        name:
+          description: ''
+          type: string
+          example: Alcohol
+      type: object
+    MainCategoryModel:
+      title: 'shop main category model'
+      description: MainCategoryModel
+      properties:
+        main_category:
+          $ref: '#/components/schemas/CategoryModel'
+        second_category:
+          $ref: '#/components/schemas/CategoryModel'
+        third_category:
+          $ref: '#/components/schemas/CategoryModel'
+      type: object
+    ShopModel:
+      title: 'shop model'
+      description: ShopModel
+      properties:
+        shop_id:
+          description: 'ID of the store.'
+          type: integer
+          example: 1152921645439779073
+        app_shop_id:
+          description: 'ID of the shop on your system.'
+          type: string
+          example: app_shop_yumiao003
+        name:
+          description: 'The name of the shop. This is the same name that is displayed to the user.'
+          type: string
+          example: test_bd_support_1
+        logo_img:
+          description: 'Shop''s log image.'
+          type: string
+        head_img:
+          description: 'Shop''s head image.URL of the main image displayed to the eater when browsing for a store. '
+          type: string
+        announce:
+          description: 'The top address line of the store location.'
+          type: string
+        addr:
+          description: 'Shop address filled in by the person in charge of the Shop.'
+          type: string
+        poi_name:
+          description: 'Shop address mapped by poi.An object representing the physical location of the store.'
+          type: string
+        lat:
+          description: 'Latitude of Store''s address in Google map.'
+          type: number
+        lng:
+          description: 'Longitude of Store''s address in Google map.'
+          type: number
+        biz_status:
+          description: 'Shop''s business status.'
+          type: integer
+        sub_biz_status:
+          description: 'Shop''s real time, detailed business status. 0:default, 1:Stored Opened, 2:Business Paused, 3:Business Closed, 4:Store Disconnected, 5:Store closed for the day, 6:Store blocked, 7:Store closed by system control(no rider)'
+          type: integer
+        auto_switch:
+          description: '1 for set store online automatically, order release is enabled.2 for set store offline automatically, order release is closed.3 for set store online and offline automatically，order release is enabled'
+          type: integer
+        promise_produce_time:
+          description: 'The average amount of time preparing an order takes, in second.'
+          type: integer
+        shop_phone:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShopPhoneModel'
+        biz_day_time:
+          type: array
+          items:
+            $ref: '#/components/schemas/BizDayTimeModel'
+        biz_holiday_time:
+          type: array
+          items:
+            $ref: '#/components/schemas/BizHolidayTimeModel'
+        main_categories:
+          $ref: '#/components/schemas/MainCategoryModel'
+        shop_front_photo:
+          description: ''
+          type: string
+        shop_surrounding_photo:
+          description: ''
+          type: string
+        building_entrance_photo:
+          description: ''
+          type: string
+        receive_cancel_apply:
+          description: ''
+          type: integer
+        receive_refund_apply:
+          description: ''
+          type: integer
+      type: object
+    ShopPhoneModel:
+      title: 'shop_phone model'
+      description: ShopPhoneModel
+      properties:
+        calling_code:
+          description: 'Country''s telephone number.'
+          type: integer
+          example: 52
+        phone:
+          description: 'phone number.'
+          type: integer
+          example: 15011498822
+        type:
+          description: '0: cell phone, 1: Fixed telephone.'
+          type: integer
+          example: 0
+      type: object
+    CateStruct:
+      title: 'category model'
+      description: CateStruct
+      required:
+        - app_category_id
+        - category_name
+        - app_item_ids
+      properties:
+        app_category_id:
+          description: 'ID for the category, provided by the restaurant or POS.'
+          type: string
+          example: '1'
+        category_name:
+          description: 'The category name to be displayed. The length is limited to 100.'
+          type: string
+          maxLength: 100
+          example: Hamburguesas
+        app_item_ids:
+          description: 'All of the IDs for the category, provided by the restaurant.'
+          type: array
+          items:
+            type: string
+          example:
+            - '1001_001'
+            - '1001_002'
+            - '1001_003'
+            - '1001_002'
+      type: object
+    ContentStruct:
+      title: 'content model'
+      description: ContentStruct
+      required:
+        - app_content_id
+        - content_name
+      properties:
+        app_content_id:
+          description: 'ID for the content, provided by the restaurant or POS.'
+          type: string
+          example: '90001'
+        app_external_id:
+          description: 'Reserved for the restaurant’s use, e.g. for POS integrations.'
+          type: string
+          example: 'anything you want here, string, json or form string, all will be ok, will send back in order'
+        content_name:
+          description: 'The content name to be displayed.The length is limited to 50.'
+          type: string
+          maxLength: 50
+          example: milk
+        is_required:
+          description: 'Is a selection required?  1 is required, 2 not required'
+          type: integer
+          example: 2
+        quantity_min_permitted:
+          description: '(optional) The minimum quantity allowed (inclusive). Cannot be negative.Map directly.'
+          type: integer
+          example: 1
+        quantity_max_permitted:
+          description: '(optional) The maximum quantity allowed (inclusive).Map directly. max_permitted cannot be less than min_permitted.'
+          type: integer
+          example: 5
+        buy_mode:
+          description: 'buy_mode=1 means you can choose one subitem multiple times. otherwise buy_mode=0.'
+          type: integer
+          example: 0
+      type: object
+    ContentWithSubItemStruct:
+      title: 'content_with_sub_item model'
+      description: ContentWithSubItemStruct
+      required:
+        - content
+        - sub_item_list
+      properties:
+        content:
+          $ref: '#/components/schemas/ContentStruct'
+        sub_item_list:
+          description: 'List of the store’s modifier groups. The sequence of the subitems under the same content must be uploaded in the same sequence. This will ensure that the menu sequence is correct.'
+          type: array
+          items:
+            $ref: '#/components/schemas/SubItemStruct'
+      type: object
+    ItemStruct:
+      title: 'item model'
+      description: ItemStruct
+      required:
+        - app_item_id
+        - item_name
+        - price
+      properties:
+        app_item_id:
+          description: 'ID for the item, provided by the restaurant or POS. Map directly.'
+          type: string
+          example: '1001_001'
+        app_external_id:
+          description: '(optional) Free-form text field reserved for the restaurant’s use, e.g. for POS integrations.'
+          type: string
+          example:
+            key: value
+        item_name:
+          description: 'Item name to be displayed. The length is limited to 50.'
+          type: string
+          maxLength: 50
+          example: sandwich
+        short_desc:
+          description: 'An optional description for the Category. The length is limited to 300.'
+          type: string
+          maxLength: 300
+          example: 'very very delicious'
+        head_img:
+          description: "The image Address of Items should be the Address from Image Upload endpoint.\n            Image requirements:\n\n            Hosted on a secure connection (SSL).\n            File size must be less than 10MB.\n            Image must be in JPEG, PNG or GIF format.\n            Both width and height must be between 320px and 1144px."
+          type: string
+          example: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Ruben_sandwich.jpg/600px-Ruben_sandwich.jpg'
+        item_type:
+          description: 'The type of entity is specified. 0:item;1:sub_item.'
+          type: integer
+          readOnly: true
+          deprecated: true
+        additional_type:
+          description: '0:item 1:combo.'
+          type: integer
+          readOnly: true
+          deprecated: true
+        sold_info:
+          description: 'Sales period per day.The continuous time spans during which the item is available.'
+          type: string
+          deprecated: true
+        sold_info_intl:
+          type: array
+          items:
+            $ref: '#/components/schemas/SoldInfoIntl'
+        currency:
+          description: 'Price of the item in the lowest local currency denomination, e.g. cents.'
+          type: string
+          readOnly: true
+          deprecated: true
+        price:
+          description: 'set in the lowest denomination (e.g., cents for MX currency, not Peso).'
+          type: integer
+        tax_rate:
+          description: 'tax rate of the item per 10000'
+          type: integer
+        content_with_sub_item:
+          description: ''
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentWithSubItemStruct'
+      type: object
+    SoldInfoIntl:
+      title: SoldInfoIntl
+      description: "Sales period per day.The continuous time spans during which the item is available.\n\n *     RETURN AS A STRING"
+      properties:
+        time:
+          description: time.
+          type: array
+          items:
+            $ref: '#/components/schemas/SoldInfoTime'
+        specialDay:
+          description: 'specialDay for sale'
+          type: array
+          items:
+            type: string
+          example:
+            - '2012-05-12'
+            - '2013-09-18'
+        day:
+          description: 'day of a week'
+          type: array
+          items:
+            type: integer
+          example:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+      type: object
+      example:
+        -
+          time:
+            -
+              begin: '08:00'
+              end: '20:00'
+          day:
+            - 1
+            - 2
+            - 3
+          specialDay: []
+        -
+          time: []
+          day:
+            - 6
+            - 7
+          specialDay: []
+        -
+          time:
+            -
+              begin: '10:00'
+              end: '12:00'
+            -
+              begin: '16:00'
+              end: '18:00'
+          day: []
+          specialDay:
+            - '2020-12-20'
+        -
+          time: []
+          day: []
+          specialDay:
+            - '2020-12-25'
+    SoldInfoTime:
+      title: SoldInfoTimes
+      description: SoldInfoTime
+      properties:
+        begin:
+          type: string
+          example: '07:00'
+        end:
+          type: string
+          example: '23:00'
+      type: object
+    MenuStruct:
+      title: 'menu model'
+      description: MenuStruct
+      required:
+        - app_menu_id
+        - menu_name
+      properties:
+        app_menu_id:
+          description: 'ID for the menu, provided by the restaurant or POS. Multiple menus shall be mapped to 1 menu.'
+          type: string
+          example: '1'
+        menu_name:
+          description: 'Menu name to be displayed.(by locale). Map directly.The length is limited to 100.'
+          type: string
+          maxLength: 100
+          example: menu1
+        app_category_ids:
+          description: 'All of the IDs for the menu categories that will be made available while this menu is active. The categories’ sequence shall be uploaded in accordance to the categories’ sequence. Please make sure that the categories’ sequence is correct.'
+          type: array
+          items:
+            type: string
+          readOnly: true
+          example: '1'
+      type: object
+    SubItemStruct:
+      title: 'subitem model'
+      description: SubItemStruct
+      required:
+        - app_sub_item_id
+        - sub_item_name
+        - price
+      properties:
+        app_sub_item_id:
+          description: 'ID for the subitem, provided by the restaurant or POS. Map directly.'
+          type: string
+          example: '1001_001'
+        app_external_id:
+          description: 'Reserved for the restaurant’s use, e.g. for POS integrations.'
+          type: string
+          example: 'not support yet'
+          deprecated: true
+        sub_item_name:
+          description: 'Item name to be displayed. The length is limited to 50.'
+          type: string
+          maxLength: 50
+          example: sandwich
+        short_desc:
+          description: 'An optional description for the subItem. The length is limited to 300.'
+          type: string
+          maxLength: 300
+          readOnly: true
+          deprecated: true
+        item_type:
+          description: '0:item;1:sub_item.'
+          type: integer
+          readOnly: true
+          deprecated: true
+        additional_type:
+          description: '0:item 1:combo.'
+          type: integer
+          readOnly: true
+          deprecated: true
+        status:
+          description: 'status:1:available;2:Unavailable. NEEDED WHEN UPDATE.'
+          type: integer
+          deprecated: true
+        currency:
+          description: 'Price of the item in the lowest local currency denomination, e.g. cents.'
+          type: string
+          readOnly: true
+          deprecated: true
+        price:
+          description: 'set in the lowest denomination (e.g., cents for MX currency, not Peso).'
+          type: integer
+        tax_rate:
+          description: 'tax rate of the item per 10000'
+          type: integer
+        content_with_sub_item:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentWithSubItemStruct'
+      type: object
+    StandardResponse:
+      title: StandardResponse
+      properties:
+        errno:
+          description: 'Error No.'
+          type: integer
+          default: 0
+        errmsg:
+          description: 'Error message'
+          type: string
+          default: ok
+        requestId:
+          description: requestId
+          type: string
+        time:
+          description: timestamp
+          type: integer
+      type: object
+externalDocs:
+  description: 'Find out more about DiDi Food'
+  url: 'https://openapi.didi-food.com'
