@@ -24,6 +24,7 @@
   },
   "type": "module",
   "dependencies": {
+    "express": "catalog:",
     "npx": "^10.2.2"
   }
 }
