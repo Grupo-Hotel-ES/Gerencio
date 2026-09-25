@@ -242,6 +242,12 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  api-integracao:
+    dependencies:
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+
   api-pedidos:
     dependencies:
       '@geroncio/shared-db':
