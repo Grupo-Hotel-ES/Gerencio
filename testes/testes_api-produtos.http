@@ -1,4 +1,6 @@
-@baseUrl = http://localhost:3004/api
+@baseUrl = http://localhost:3004
+
+### --- PRODUTOS ---
 
 ### 1. Criar Produto (POST)
 # @name createProduto
@@ -8,7 +10,7 @@ Content-Type: application/json
 {
   "nome": "Espetinho de carne",
   "preco": 29.90,
-  "restauranteId": 6
+  "restauranteId": 1
 }
 
 ###
@@ -57,3 +59,38 @@ GET {{baseUrl}}/produtos/abc
 
 ### 8. Buscar Produto Inexistente (Tratamento de Erro - 404)
 GET {{baseUrl}}/produtos/9999
+
+###
+
+### --- MAPEAMENTO APP ---
+
+### 9. Criar Mapeamento (POST)
+# @name createMapeamento
+POST {{baseUrl}}/mapeamentos
+Content-Type: application/json
+
+{
+  "produtoId": 1,
+  "plataforma": "IFOOD",
+  "idExternoApp": "SKU-IFOOD-123"
+}
+
+###
+
+### 10. Listar Todos os Mapeamentos (GET)
+GET {{baseUrl}}/mapeamentos
+
+###
+
+### 11. Buscar Mapeamento por Plataforma e ID Externo (GET - Usado na Integração)
+GET {{baseUrl}}/mapeamentos/buscar?plataforma=IFOOD&idExternoApp=SKU-IFOOD-123
+
+###
+
+### 12. Deletar Mapeamento (DELETE)
+DELETE {{baseUrl}}/mapeamentos/1
+
+###
+
+### 13. Buscar Mapeamento Inexistente (Tratamento de Erro - 404)
+GET {{baseUrl}}/mapeamentos/buscar?plataforma=IFOOD&idExternoApp=NAO_EXISTE
