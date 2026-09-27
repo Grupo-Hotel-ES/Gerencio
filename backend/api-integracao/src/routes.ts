@@ -1,4 +1,5 @@
 import { Router, type Request } from 'express'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import { db, type Prisma } from '@geroncio/shared-db'
 
 const routes = Router()
@@ -6,6 +7,9 @@ const routes = Router()
 // ---------------------------------------------------------------------------
 // Tipos
 // ---------------------------------------------------------------------------
+
+/** Request com o corpo original preservado pelo express.json (ver server.ts). */
+export type RequestComCorpoBruto = Request & { corpoBruto?: Buffer }
 
 /** Plataformas que notificam novos pedidos via webhook. */
 type Plataforma = 'ifood' | '99food' | 'keeta' | 'ubereats' | 'rappi'
@@ -16,6 +20,8 @@ interface NotificacaoPedido {
   pedidoIdExterno: string
   lojaIdExterno?: string
   tipo: string
+  /** Pedido completo, quando a plataforma já o envia no próprio webhook (ex.: Rappi). */
+  pedido?: unknown
 }
 
 /** Item do pedido no formato da plataforma, antes do mapeamento para Produto. */
@@ -64,12 +70,74 @@ function adapterNaoImplementado(nome: string): AdapterPlataforma {
   }
 }
 
+// Rappi: o webhook de novo pedido envia uma LISTA com os pedidos completos
+// ({ order_detail, customer, store }), então não é preciso buscá-los na API.
+// Valores monetários em reais.
+const rappi: AdapterPlataforma = {
+  validarAssinatura(req) {
+    const segredo = process.env.RAPPI_WEBHOOK_SECRET
+    if (!segredo) return true // sem segredo configurado (ambiente de desenvolvimento)
+
+    // Header: t=<timestamp>,sign=<hmac-sha256 de "<t>.<corpo>">
+    const header = req.get('Rappi-Signature') ?? ''
+    const partes = Object.fromEntries(header.split(',').map((parte) => parte.trim().split('=', 2)))
+    const corpo = (req as RequestComCorpoBruto).corpoBruto
+    if (!partes.t || !partes.sign || !corpo) return false
+
+    const esperado = createHmac('sha256', segredo).update(`${partes.t}.`).update(corpo).digest()
+    const recebido = Buffer.from(partes.sign, 'hex')
+    return recebido.length === esperado.length && timingSafeEqual(recebido, esperado)
+  },
+
+  extrairNotificacoes(corpo) {
+    if (!Array.isArray(corpo)) throw new Error('O corpo deve ser uma lista de pedidos')
+    return corpo.map((pedido, i) => {
+      const orderId = pedido?.order_detail?.order_id
+      if (orderId === undefined || orderId === null) throw new Error(`Pedido ${i} sem order_detail.order_id`)
+      return {
+        eventoId: `rappi-${orderId}`,
+        pedidoIdExterno: String(orderId),
+        lojaIdExterno: pedido.store?.internal_id !== undefined ? String(pedido.store.internal_id) : undefined,
+        tipo: 'NEW_ORDER',
+        pedido,
+      }
+    })
+  },
+
+  async buscarPedido(notificacao) {
+    // TODO: buscar na API da Rappi quando o webhook não trouxer o pedido completo
+    if (!notificacao.pedido) throw new Error(`Pedido ${notificacao.pedidoIdExterno} ausente no webhook`)
+    return notificacao.pedido
+  },
+
+  converterPedido(pedido) {
+    const detalhe = pedido.order_detail
+    const entrega = detalhe.delivery_information
+    const nomeCliente = [pedido.customer?.first_name, pedido.customer?.last_name].filter(Boolean).join(' ')
+
+    return {
+      nomeCliente: nomeCliente || detalhe.billing_information?.name || null,
+      preco: Number(detalhe.totals.total_order),
+      metodoPagamento: detalhe.payment_method === 'cash' ? 'dinheiro' : 'cartao',
+      // Retirada ("pickup") não tem endereço de entrega
+      enderecoDestino: entrega?.complete_address ?? '',
+      cepDestino: entrega?.postal_code ?? '',
+      latitude: null,
+      longitude: null,
+      itens: detalhe.items.map((item: any) => ({
+        idExterno: String(item.sku ?? item.id),
+        quantidade: Number(item.quantity),
+      })),
+    }
+  },
+}
+
 const ADAPTERS: Record<Plataforma, AdapterPlataforma> = {
   ifood: adapterNaoImplementado('iFood'),
   '99food': adapterNaoImplementado('99Food'),
   keeta: adapterNaoImplementado('Keeta'),
   ubereats: adapterNaoImplementado('Uber Eats'),
-  rappi: adapterNaoImplementado('Rappi'),
+  rappi,
 }
 
 function obterAdapter(plataforma: string | undefined): AdapterPlataforma | null {

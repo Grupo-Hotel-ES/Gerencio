@@ -1,11 +1,18 @@
 // api-pedidos/src/server.ts
 import express, { type ErrorRequestHandler } from 'express'
-import routes from './routes'
+import routes, { type RequestComCorpoBruto } from './routes'
 
 const app = express()
 
 // Middleware
-app.use(express.json())
+app.use(
+  express.json({
+    // Guarda o corpo original: a assinatura dos webhooks é calculada sobre os bytes recebidos
+    verify: (req, _res, buf) => {
+      ;(req as RequestComCorpoBruto).corpoBruto = buf
+    },
+  }),
+)
 app.use(express.urlencoded({ extended: true }))
 
 // CORS
