@@ -66,5 +66,17 @@ services:
       <<: *api-env
       PORT: 3003
 
+  api-produtos:
+    <<: *api-common
+    container_name: geroncio-api-produtos
+    build:
+      context: .
+      dockerfile: ./api-produtos/Dockerfile
+    ports:
+      - "3004:3004"
+    environment:
+      <<: *api-env
+      PORT: 3004
+
 volumes:
   geroncio_pgdata:

@@ -40,28 +40,22 @@ routes.post('/clientes', async (req, res) => {
   res.status(201).json(cliente)
 })
 
-// Atualizar cliente
-routes.put('/clientes/:id', async (req, res) => {
-  const id = parseId(req.params.id)
-  if (id === null) {
-    res.status(400).json({ error: 'Id inválido' })
+  const clienteExistente = await db.cliente.findUnique({ where: { id } })
+  if (!clienteExistente) {
+    res.status(404).json({ error: 'Cliente não encontrado' })
     return
   }
 
   const { nomeCliente, endereco, telefone, email, cpf } = req.body
 
-  try {
-    const cliente = await db.cliente.update({
-      where: { id },
-      data: { nomeCliente, endereco, telefone, email, cpf },
-    })
-    res.json(cliente)
-  } catch {
-    res.status(404).json({ error: 'Cliente não encontrado' })
-  }
+  const clienteAtualizado = await db.cliente.update({
+    where: { id },
+    data: { nomeCliente, endereco, telefone, email, cpf },
+  })
+
+  res.json(clienteAtualizado)
 })
 
-// Deletar cliente
 routes.delete('/clientes/:id', async (req, res) => {
   const id = parseId(req.params.id)
   if (id === null) {
@@ -69,12 +63,14 @@ routes.delete('/clientes/:id', async (req, res) => {
     return
   }
 
-  try {
-    await db.cliente.delete({ where: { id } })
-    res.status(204).send()
-  } catch {
+  const clienteExistente = await db.cliente.findUnique({ where: { id } })
+  if (!clienteExistente) {
     res.status(404).json({ error: 'Cliente não encontrado' })
+    return
   }
+
+  await db.cliente.delete({ where: { id } })
+  res.status(204).send()
 })
 
 export default routes
