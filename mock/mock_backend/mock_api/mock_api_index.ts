@@ -351,6 +351,14 @@ async function rotear(req: IncomingMessage, res: ServerResponse) {
   const metodo = req.method ?? "GET";
   let m: RegExpMatchArray | null;
 
+  if (metodo === "POST" && pathname === "/oauth/v2/token") {
+    return enviarJson(res, 200, {
+      access_token: randomUUID(),
+      token_type: "Bearer",
+      expires_in: 2592000
+    });
+  }
+
   if (metodo === "GET" && pathname === "/health") {
     await prisma.$queryRaw`SELECT 1`;
     return enviarJson(res, 200, { ok: true });
