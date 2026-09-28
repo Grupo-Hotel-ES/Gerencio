@@ -9,7 +9,7 @@
 // (ex: pnpm dev com --watch), os dados voltam ao estado inicial
 // definido em `seed()`
 
-import type { OrderInfo } from './types.js'
+import type { OrderInfo } from './types.js' //-----------------> RESOLVER ISSO AQ
 
 const orders = new Map<string, OrderInfo>()
 
