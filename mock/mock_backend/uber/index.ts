@@ -1,7 +1,4 @@
-// mock_backend/uber/index.ts
-
-import { randomUUID } from "node:crypto";
-import * as crypto from 'crypto';
+import { randomUUID, createHmac } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // Formato nativo do Uber Eats (OpenAPI restaurant_order)
@@ -121,7 +118,7 @@ export function montarPedidoUber(dados: DadosPedidoMock): UberOrder {
           items: dados.itens.map((item) => ({
             id: String(item.codigoExterno),
             title: item.nome,
-            external_data: String(item.codigoExterno), // Utilizado pelo Gerêncio no resource_href
+            external_data: String(item.codigoExterno),
             quantity: {
               amount: item.quantidade
             }
@@ -144,33 +141,36 @@ export function montarPedidoUber(dados: DadosPedidoMock): UberOrder {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Webhooks
+// ---------------------------------------------------------------------------
+
 export async function dispararWebhookUber(eventoId: string, pedidoId: string, url: string, clientSecret: string): Promise<Response> {
-    const payload = {
-        event_id: eventoId,
-        event_time: Date.now(),
-        event_type: "orders.notification",
-        meta: {
-            resource_id: pedidoId,
-            status: "pos",
-        },
-        resource_href: `https://api.uber.com/v2/eats/orders/${pedidoId}`
-    };
+  const payload = {
+    event_id: eventoId,
+    event_time: Date.now(),
+    event_type: "orders.notification",
+    meta: {
+      resource_id: pedidoId,
+      status: "pos",
+    },
+    resource_href: `https://api.uber.com/v2/eats/order/${pedidoId}`
+  };
 
-    const payloadString = JSON.stringify(payload);
-    
-    const signature = crypto
-        .createHmac('sha256', clientSecret)
-        .update(payloadString)
-        .digest('hex');
+  const payloadString = JSON.stringify(payload);
+  
+  const signature = createHmac('sha256', clientSecret)
+    .update(payloadString)
+    .digest('hex');
 
-    return fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-Uber-Signature': signature
-        },
-        body: payloadString
-    });
+  return fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Uber-Signature': signature
+    },
+    body: payloadString
+  });
 }
 
 export async function dispararWebhookFalhaUber(eventoId: string, pedidoIdExterno: string, lojaIdExterno: string, url: string, clientSecret: string): Promise<Response> {
@@ -188,8 +188,7 @@ export async function dispararWebhookFalhaUber(eventoId: string, pedidoIdExterno
 
   const payloadString = JSON.stringify(payload);
 
-  const signature = crypto
-    .createHmac("sha256", clientSecret)
+  const signature = createHmac("sha256", clientSecret)
     .update(payloadString)
     .digest("hex");
 

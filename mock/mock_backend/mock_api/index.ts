@@ -10,20 +10,13 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, Prisma } from "../../src/generated/prisma/client.ts";
 import type { Plataforma, TipoPedido, EntreguePor, CanalEvento } from "../../src/generated/prisma/enums.ts";
 import { montarPedidoRappi, dispararWebhookNovoPedido as dispararWebhookRappi } from "../rappi/index.ts";
-
-/*
-SOLUÇÃO PROPOSTA PELO GEMINI:
-
-import { montarPedidoUber, dispararWebhookUber, dispararWebhookFalhaUber} from "../uber/index.ts";
-
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); (Linha presente na solução GEMINI - REVISAR)
-
-const UBER_CLIENT_SECRET = process.env.UBER_CLIENT_SECRET || 'mock_secret_key';
-*/
+import { montarPedidoUber, dispararWebhookUber, dispararWebhookFalhaUber } from "../uber/index.ts";
 
 const PORTA = Number(process.env["MOCK_API_PORT"] ?? 3333);
 const RESTAURANTE_ID_PADRAO = process.env["MOCK_RESTAURANTE_ID"] ?? "restaurante-mock";
+const UBER_CLIENT_SECRET = process.env["UBER_CLIENT_SECRET"] || 'mock_secret_key';
+
+export const uberTimers = new Map<string, NodeJS.Timeout>();
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env["MOCK_DATABASE_URL"] }),
@@ -71,7 +64,7 @@ const PLATAFORMAS: Record<Plataforma, ConfigPlataforma> = {
     statusInicial: "CREATED",
     tipoEventoNovoPedido: "orders.notification",
     canal: "WEBHOOK",
-    prazoAceiteSegundos: 90,
+    prazoAceiteSegundos: 690,
     lojaIdPadrao: "uber-loja-mock",
     gerarIdExterno: () => randomUUID(),
   },
@@ -85,7 +78,6 @@ const PLATAFORMAS: Record<Plataforma, ConfigPlataforma> = {
   },
 };
 
-// Aceita tanto o enum quanto os valores usados no <select> do frontend ("ifood", "99 food", "uber eats"...)
 function normalizarPlataforma(valor: unknown): Plataforma | null {
   if (typeof valor !== "string") return null;
   const chave = valor.trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -155,20 +147,6 @@ type ItemEntrada = {
   complementos?: Prisma.InputJsonValue[];
 };
 
-// ESSE COMENTÁRIO NÃO É UMA SOLUÇÃO PROPOSTA PELO GEMINI
-/**
- * POST /pedidos
- * {
- *   plataforma: "ifood" | "99 food" | "uber eats" | "keeta" | "rappi" | enum,
- *   cliente: { nome, telefone?, cpf? } | string,
- *   endereco?: { rua, numero, ... } | string,   // obrigatório quando tipo = ENTREGA
- *   itens: [{ codigoExterno?, nome, quantidade, precoUnitarioCentavos, observacao?, complementos? }],
- *   tipo?: "ENTREGA" | "RETIRADA", entreguePor?: "PLATAFORMA" | "LOJA",
- *   taxaEntregaCentavos?, descontoPlataformaCentavos?, descontoLojaCentavos?,
- *   pagamento?: { pagoOnline, metodo, trocoParaCentavos? },
- *   observacao?, agendadoPara?, restauranteId?, lojaIdExterno?
- * }
- */
 async function criarPedido(corpo: any) {
   const plataforma = normalizarPlataforma(corpo.plataforma);
   if (!plataforma) throw new ErroHttp(400, `Plataforma inválida: ${JSON.stringify(corpo.plataforma)}`);
@@ -238,15 +216,12 @@ async function criarPedido(corpo: any) {
     prazoAceiteEm: new Date(agora.getTime() + config.prazoAceiteSegundos * 1000),
   };
 
-  // Payload "nativo" devolvido no GET de detalhes. Os formatos exatos de cada
-  // plataforma podem ser montados nos módulos mock_backend/<plataforma>.
   const enderecoJson = endereco === Prisma.DbNull ? null : endereco;
   const pedidoRappi = plataforma === "RAPPI" ? montarPedidoRappi({ ...dadosPedido, itens, endereco: enderecoJson, criadoEm: agora }) : null;
   const pedidoUber = plataforma === "UBER_EATS" ? montarPedidoUber({ ...dadosPedido, itens, endereco: enderecoJson, criadoEm: agora }) : null;
   
   const payload = pedidoRappi ?? pedidoUber ?? { ...dadosPedido, id: idExterno, endereco: enderecoJson };
   
-  // Corpo exato do evento: na Rappi é o próprio corpo do webhook (lista de pedidos)
   const payloadEvento = pedidoRappi
     ? [pedidoRappi]
     : { tipo: config.tipoEventoNovoPedido, pedidoId: idExterno, lojaId: lojaIdExterno, criadoEm: agora.toISOString() };
@@ -269,10 +244,14 @@ async function criarPedido(corpo: any) {
   });
 
   if (pedidoRappi) void notificarWebhookRappi(pedido.eventos[0]!.id, pedidoRappi);
+  if (pedidoUber) {
+    const urlDestino = process.env["UBER_WEBHOOK_URL"] ?? "http://localhost:3005/api/webhooks/ubereats";
+    void notificarWebhookUber(pedido.eventos[0]!.id, idExterno, lojaIdExterno, urlDestino);
+  }
+
   return pedido;
 }
 
-/** Dispara o webhook em segundo plano e registra a tentativa no evento. */
 async function notificarWebhookRappi(eventoId: string, pedidoRappi: Parameters<typeof dispararWebhookRappi>[0][number]) {
   const resultado = await dispararWebhookRappi([pedidoRappi]);
   if (!resultado.ok) console.warn(`[rappi] Webhook falhou (${resultado.statusHttp ?? resultado.erro})`);
@@ -284,13 +263,6 @@ async function notificarWebhookRappi(eventoId: string, pedidoRappi: Parameters<t
     .catch((erro) => console.error("[rappi] Erro ao registrar tentativa do webhook:", erro));
 }
 
-
-/*
-SOLUÇÃO PROPOSTA PELO GEMINI:
-
-// 1. Controle global de timers para os pedidos do Uber Eats
-export const uberTimers = new Map<string, NodeJS.Timeout>();
-
 export async function notificarWebhookUber(eventoId: string, pedidoIdExterno: string, lojaIdExterno: string, webhookUrl: string): Promise<void> {
   try {
     const response = await dispararWebhookUber(eventoId, pedidoIdExterno, webhookUrl, UBER_CLIENT_SECRET);
@@ -301,7 +273,6 @@ export async function notificarWebhookUber(eventoId: string, pedidoIdExterno: st
         data: { ackEm: new Date() }
       });
 
-      // Iniciar o timer de 11,5 minutos (690.000 ms) para timeout de decisão
       const timer = setTimeout(async () => {
         await verificarTimeoutUber(pedidoIdExterno, lojaIdExterno, webhookUrl);
       }, 690 * 1000);
@@ -366,8 +337,6 @@ async function verificarTimeoutUber(pedidoIdExterno: string, lojaIdExterno: stri
     console.error(`[UBER_EATS] Erro ao verificar timeout do pedido ${pedidoIdExterno}:`, error);
   }
 }
-*/
-
 
 async function listarPedidos(params: URLSearchParams) {
   const where: Prisma.PedidoWhereInput = {};
@@ -389,7 +358,6 @@ async function buscarPedido(id: string) {
   return pedido;
 }
 
-/** PATCH /pedidos/:id/status  { status, tipoEvento? } — altera o status e registra um evento */
 async function atualizarStatus(id: string, corpo: any) {
   if (!corpo.status || typeof corpo.status !== "string") throw new ErroHttp(400, '"status" é obrigatório');
   const pedido = await buscarPedido(id);
@@ -417,7 +385,6 @@ async function removerPedido(id: string) {
   await prisma.pedido.delete({ where: { id } });
 }
 
-/** GET /eventos?plataforma=&canal=&pendentes=true */
 async function listarEventos(params: URLSearchParams) {
   const where: Prisma.EventoWhereInput = {};
   const plataforma = params.get("plataforma");
@@ -489,9 +456,6 @@ async function rotear(req: IncomingMessage, res: ServerResponse) {
     return enviarJson(res, 200, await confirmarEvento(m[1]!));
   }
 
-  /*
-  SOLUÇÃO PROPOSTA PELO GEMINI:
-
   if ((m = pathname.match(new RegExp(`^/v2/eats/order/${UUID}$`))) && metodo === "GET") {
     const pedido = await prisma.pedido.findFirst({
       where: { 
@@ -508,7 +472,6 @@ async function rotear(req: IncomingMessage, res: ServerResponse) {
   if ((m = pathname.match(new RegExp(`^/v1/eats/orders/${UUID}/accept_pos_order$`))) && metodo === "POST") {
     const pedidoIdExterno = m[1]!;
 
-    // Limpa/invalida o timer de cancelamento da Etapa 5
     if (uberTimers.has(pedidoIdExterno)) {
       clearTimeout(uberTimers.get(pedidoIdExterno));
       uberTimers.delete(pedidoIdExterno);
@@ -548,7 +511,6 @@ async function rotear(req: IncomingMessage, res: ServerResponse) {
     const pedidoIdExterno = m[1]!;
     const corpo = await lerCorpo(req);
 
-    // Limpa/invalida o timer de cancelamento da Etapa 5
     if (uberTimers.has(pedidoIdExterno)) {
       clearTimeout(uberTimers.get(pedidoIdExterno));
       uberTimers.delete(pedidoIdExterno);
@@ -563,7 +525,7 @@ async function rotear(req: IncomingMessage, res: ServerResponse) {
     await prisma.pedido.update({
       where: { id: pedido.id },
       data: {
-        status: "DENIED", // ou FAILED, dependendo da padronização interna
+        status: "DENIED",
         eventos: {
           create: {
             plataforma: "UBER_EATS",
@@ -584,7 +546,6 @@ async function rotear(req: IncomingMessage, res: ServerResponse) {
     res.writeHead(204);
     return res.end();
   }
-  */
 
   throw new ErroHttp(404, `Rota não encontrada: ${metodo} ${pathname}`);
 }

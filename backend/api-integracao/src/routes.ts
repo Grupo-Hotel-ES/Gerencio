@@ -2,17 +2,6 @@ import { Router, type Request } from 'express'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { db, type Prisma } from '@geroncio/shared-db'
 
-/*
-SOLUÇÃO PROPOSTA PELO GEMINI
-
-import { Router, Request, Response } from 'express';
-import crypto from 'crypto';
-
-interface RequestComCorpoBruto extends Request {
-    corpoBruto?: Buffer | string;
-}
-*/
-
 const routes = Router()
 
 // ---------------------------------------------------------------------------
@@ -74,12 +63,13 @@ function adapterNaoImplementado(nome: string): AdapterPlataforma {
     throw new Error(`Integração com ${nome} ainda não implementada`)
   }
   return {
-    validarAssinatura: () => true, // TODO: validar assinatura do webhook
+    validarAssinatura: () => true,
     extrairNotificacoes: erro,
     buscarPedido: async () => erro(),
     converterPedido: erro,
   }
 }
+
 
 // Rappi: o webhook de novo pedido envia uma LISTA com os pedidos completos
 // ({ order_detail, customer, store }), então não é preciso buscá-los na API.
@@ -87,9 +77,8 @@ function adapterNaoImplementado(nome: string): AdapterPlataforma {
 const rappi: AdapterPlataforma = {
   validarAssinatura(req) {
     const segredo = process.env.RAPPI_WEBHOOK_SECRET
-    if (!segredo) return true // sem segredo configurado (ambiente de desenvolvimento)
+    if (!segredo) return true 
 
-    // Header: t=<timestamp>,sign=<hmac-sha256 de "<t>.<corpo>">
     const header = req.get('Rappi-Signature') ?? ''
     const partes = Object.fromEntries(header.split(',').map((parte) => parte.trim().split('=', 2)))
     const corpo = (req as RequestComCorpoBruto).corpoBruto
@@ -116,7 +105,6 @@ const rappi: AdapterPlataforma = {
   },
 
   async buscarPedido(notificacao) {
-    // TODO: buscar na API da Rappi quando o webhook não trouxer o pedido completo
     if (!notificacao.pedido) throw new Error(`Pedido ${notificacao.pedidoIdExterno} ausente no webhook`)
     return notificacao.pedido
   },
@@ -130,7 +118,6 @@ const rappi: AdapterPlataforma = {
       nomeCliente: nomeCliente || detalhe.billing_information?.name || null,
       preco: Number(detalhe.totals.total_order),
       metodoPagamento: detalhe.payment_method === 'cash' ? 'dinheiro' : 'cartao',
-      // Retirada ("pickup") não tem endereço de entrega
       enderecoDestino: entrega?.complete_address ?? '',
       cepDestino: entrega?.postal_code ?? '',
       latitude: null,
@@ -143,54 +130,19 @@ const rappi: AdapterPlataforma = {
   },
 }
 
-/* 
-SOLUÇÃO PROPOSTA PELO GEMINI (FEITA NA ETAPA 3)
- 
-const UBER_CLIENT_SECRET = process.env.UBER_CLIENT_SECRET || 'mock_secret_key';
-
-export const UberEatsAdapter = {
-    validarAssinatura: (req: RequestComCorpoBruto): boolean => {
-        const signatureHeader = req.get('X-Uber-Signature');
-        if (!signatureHeader || !req.corpoBruto) return false;
-
-        const expectedSignature = crypto
-            .createHmac('sha256', UBER_CLIENT_SECRET)
-            .update(req.corpoBruto)
-            .digest('hex');
-
-        try {
-            return crypto.timingSafeEqual(
-                Buffer.from(signatureHeader),
-                Buffer.from(expectedSignature)
-            );
-        } catch {
-            return signatureHeader === expectedSignature;
-        }
-    },
-
-    extrairNotificacoes: (body: any): string | null => {
-        if (body?.event_type === 'orders.notification' && body?.meta?.resource_id) {
-            return body.meta.resource_id;
-        }
-        return null;
-    }
-};
-*/
-
-/*
-SOLUÇÃO PROPOSTA PELO GEMINI (FEITA NA ETAPA 4)
-
 const ubereats: AdapterPlataforma = {
   validarAssinatura(req) {
     const segredo = process.env.UBER_WEBHOOK_SECRET;
-    if (!segredo) return true; // sem segredo configurado (ambiente de dev)
+    if (!segredo) return true;
 
     const assinatura = req.get('X-Uber-Signature');
     const corpo = (req as RequestComCorpoBruto).corpoBruto;
     if (!assinatura || !corpo) return false;
 
-    const esperado = createHmac('sha256', segredo).update(corpo).digest('hex');
-    return assinatura === esperado;
+    const esperado = createHmac('sha256', segredo).update(corpo).digest();
+    const assinaturaBuffer = Buffer.from(assinatura, 'hex');
+
+    return assinaturaBuffer.length === esperado.length && timingSafeEqual(assinaturaBuffer, esperado);
   },
 
   extrairNotificacoes(corpo) {
@@ -212,7 +164,6 @@ const ubereats: AdapterPlataforma = {
       throw new Error(`resource_href ausente na notificação do pedido ${notificacao.pedidoIdExterno}`);
     }
 
-    // Chamada à Etapa 1 para obter o token Bearer (usando a base URL do mock)
     const mockUrl = process.env.MOCK_API_URL ?? 'http://localhost:3333';
     const authRes = await fetch(`${mockUrl}/oauth/v2/token`, { method: 'POST' });
     if (!authRes.ok) throw new Error('Falha ao obter token OAuth do Uber Eats');
@@ -235,7 +186,6 @@ const ubereats: AdapterPlataforma = {
     const customer = order.customers?.[0];
     const nomeCliente = customer ? `${customer.name?.first_name || ''} ${customer.name?.last_name || ''}`.trim() : null;
 
-    // Converte o valor de E5 (X * 10^5) para um formato numérico padrão (Reais)
     const precoE5 = order.payment?.payment_detail?.order_total?.net?.amount_e5 || 0;
     const preco = precoE5 / 100000;
 
@@ -247,7 +197,7 @@ const ubereats: AdapterPlataforma = {
 
     const itens: ItemExterno[] = order.carts?.flatMap((cart: any) =>
       cart.items?.map((item: any) => ({
-        idExterno: String(item.external_data || item.id), // external_data possui o ID mapeado
+        idExterno: String(item.external_data || item.id),
         quantidade: Number(item.quantity?.amount || 1)
       })) || []
     ) || [];
@@ -255,7 +205,7 @@ const ubereats: AdapterPlataforma = {
     return {
       nomeCliente,
       preco,
-      metodoPagamento: 'cartao', // Pagamentos via UberEats são sempre online/cartão para a integração
+      metodoPagamento: 'cartao',
       enderecoDestino,
       cepDestino: location?.postal_code ?? '',
       latitude: location?.latitude ? Number(location.latitude) : null,
@@ -264,13 +214,12 @@ const ubereats: AdapterPlataforma = {
     };
   }
 };
-*/
 
 const ADAPTERS: Record<Plataforma, AdapterPlataforma> = {
   ifood: adapterNaoImplementado('iFood'),
   '99food': adapterNaoImplementado('99Food'),
   keeta: adapterNaoImplementado('Keeta'),
-  ubereats: adapterNaoImplementado('Uber Eats'), /* SOLUÇÃO GEMINI: substituir essa linha por ubereats, */
+  ubereats,
   rappi,
 }
 
@@ -300,7 +249,6 @@ async function mapearItens(plataforma: Plataforma, itens: ItemExterno[]) {
 }
 
 async function salvarPedido(plataforma: Plataforma, pedido: PedidoConvertido) {
-  // TODO: evitar duplicidade (webhooks podem ser reenviados) guardando o id externo do pedido
   const data: Prisma.PedidoCreateInput = {
     nomeCliente: pedido.nomeCliente,
     preco: pedido.preco,
@@ -348,37 +296,15 @@ routes.post('/webhooks/:plataforma', async (req, res) => {
     return
   }
 
-  // Responde imediatamente: as plataformas exigem resposta rápida e reenviam em caso de timeout.
   res.status(202).json({ recebidas: notificacoes.length })
 
   for (const notificacao of notificacoes) {
     try {
       await processarNotificacao(plataforma, adapter, notificacao)
     } catch (error) {
-      // TODO: registrar falha para reprocessamento
       console.error(`[${plataforma}] Erro ao processar pedido ${notificacao.pedidoIdExterno}:`, error)
     }
   }
 })
-
-/*
-SOLUÇÃO PROPOSTA PELO GEMINI
-
-router.post('/webhook/uber', (req: RequestComCorpoBruto, res: Response) => {
-    if (!UberEatsAdapter.validarAssinatura(req)) {
-        return res.status(401).json({ erro: 'Assinatura X-Uber-Signature inválida ou ausente.' });
-    }
-
-    const pedidoId = UberEatsAdapter.extrairNotificacoes(req.body);
-
-    if (!pedidoId) {
-        return res.status(400).json({ erro: 'Payload de notificação inválido ou event_type não suportado.' });
-    }
-
-    // Engatilhar fila de processamento do pedidoId na API Integração aqui
-
-    return res.status(200).send();
-});
-*/
 
 export default routes
