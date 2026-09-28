@@ -2,6 +2,17 @@ import { Router, type Request } from 'express'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { db, type Prisma } from '@geroncio/shared-db'
 
+/*
+SOLUÇÃO PROPOSTA PELO GEMINI
+
+import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
+
+interface RequestComCorpoBruto extends Request {
+    corpoBruto?: Buffer | string;
+}
+*/
+
 const routes = Router()
 
 // ---------------------------------------------------------------------------
@@ -132,11 +143,134 @@ const rappi: AdapterPlataforma = {
   },
 }
 
+/* 
+SOLUÇÃO PROPOSTA PELO GEMINI (FEITA NA ETAPA 3)
+ 
+const UBER_CLIENT_SECRET = process.env.UBER_CLIENT_SECRET || 'mock_secret_key';
+
+export const UberEatsAdapter = {
+    validarAssinatura: (req: RequestComCorpoBruto): boolean => {
+        const signatureHeader = req.get('X-Uber-Signature');
+        if (!signatureHeader || !req.corpoBruto) return false;
+
+        const expectedSignature = crypto
+            .createHmac('sha256', UBER_CLIENT_SECRET)
+            .update(req.corpoBruto)
+            .digest('hex');
+
+        try {
+            return crypto.timingSafeEqual(
+                Buffer.from(signatureHeader),
+                Buffer.from(expectedSignature)
+            );
+        } catch {
+            return signatureHeader === expectedSignature;
+        }
+    },
+
+    extrairNotificacoes: (body: any): string | null => {
+        if (body?.event_type === 'orders.notification' && body?.meta?.resource_id) {
+            return body.meta.resource_id;
+        }
+        return null;
+    }
+};
+*/
+
+/*
+SOLUÇÃO PROPOSTA PELO GEMINI (FEITA NA ETAPA 4)
+
+const ubereats: AdapterPlataforma = {
+  validarAssinatura(req) {
+    const segredo = process.env.UBER_WEBHOOK_SECRET;
+    if (!segredo) return true; // sem segredo configurado (ambiente de dev)
+
+    const assinatura = req.get('X-Uber-Signature');
+    const corpo = (req as RequestComCorpoBruto).corpoBruto;
+    if (!assinatura || !corpo) return false;
+
+    const esperado = createHmac('sha256', segredo).update(corpo).digest('hex');
+    return assinatura === esperado;
+  },
+
+  extrairNotificacoes(corpo) {
+    if (corpo?.event_type !== 'orders.notification' || !corpo?.meta?.resource_id) {
+      return [];
+    }
+    
+    return [{
+      eventoId: String(corpo.event_id),
+      pedidoIdExterno: String(corpo.meta.resource_id),
+      tipo: String(corpo.event_type),
+      pedido: { resource_href: corpo.resource_href }
+    }];
+  },
+
+  async buscarPedido(notificacao) {
+    const resourceHref = (notificacao.pedido as any)?.resource_href;
+    if (!resourceHref) {
+      throw new Error(`resource_href ausente na notificação do pedido ${notificacao.pedidoIdExterno}`);
+    }
+
+    // Chamada à Etapa 1 para obter o token Bearer (usando a base URL do mock)
+    const mockUrl = process.env.MOCK_API_URL ?? 'http://localhost:3333';
+    const authRes = await fetch(`${mockUrl}/oauth/v2/token`, { method: 'POST' });
+    if (!authRes.ok) throw new Error('Falha ao obter token OAuth do Uber Eats');
+    
+    const { access_token } = await authRes.json();
+
+    const pedidoRes = await fetch(resourceHref, {
+      headers: { 'Authorization': `Bearer ${access_token}` }
+    });
+
+    if (!pedidoRes.ok) {
+      throw new Error(`Erro ao buscar pedido no Uber Eats: ${pedidoRes.statusText}`);
+    }
+
+    return pedidoRes.json();
+  },
+
+  converterPedido(pedidoExterno) {
+    const order = pedidoExterno.order || pedidoExterno;
+    const customer = order.customers?.[0];
+    const nomeCliente = customer ? `${customer.name?.first_name || ''} ${customer.name?.last_name || ''}`.trim() : null;
+
+    // Converte o valor de E5 (X * 10^5) para um formato numérico padrão (Reais)
+    const precoE5 = order.payment?.payment_detail?.order_total?.net?.amount_e5 || 0;
+    const preco = precoE5 / 100000;
+
+    const delivery = order.deliveries?.[0];
+    const location = delivery?.location;
+    const enderecoDestino = location 
+      ? `${location.street_address_line_one || ''} ${location.street_address_line_two || ''}`.trim() 
+      : '';
+
+    const itens: ItemExterno[] = order.carts?.flatMap((cart: any) =>
+      cart.items?.map((item: any) => ({
+        idExterno: String(item.external_data || item.id), // external_data possui o ID mapeado
+        quantidade: Number(item.quantity?.amount || 1)
+      })) || []
+    ) || [];
+
+    return {
+      nomeCliente,
+      preco,
+      metodoPagamento: 'cartao', // Pagamentos via UberEats são sempre online/cartão para a integração
+      enderecoDestino,
+      cepDestino: location?.postal_code ?? '',
+      latitude: location?.latitude ? Number(location.latitude) : null,
+      longitude: location?.longitude ? Number(location.longitude) : null,
+      itens
+    };
+  }
+};
+*/
+
 const ADAPTERS: Record<Plataforma, AdapterPlataforma> = {
   ifood: adapterNaoImplementado('iFood'),
   '99food': adapterNaoImplementado('99Food'),
   keeta: adapterNaoImplementado('Keeta'),
-  ubereats: adapterNaoImplementado('Uber Eats'),
+  ubereats: adapterNaoImplementado('Uber Eats'), /* SOLUÇÃO GEMINI: substituir essa linha por ubereats, */
   rappi,
 }
 
@@ -226,5 +360,25 @@ routes.post('/webhooks/:plataforma', async (req, res) => {
     }
   }
 })
+
+/*
+SOLUÇÃO PROPOSTA PELO GEMINI
+
+router.post('/webhook/uber', (req: RequestComCorpoBruto, res: Response) => {
+    if (!UberEatsAdapter.validarAssinatura(req)) {
+        return res.status(401).json({ erro: 'Assinatura X-Uber-Signature inválida ou ausente.' });
+    }
+
+    const pedidoId = UberEatsAdapter.extrairNotificacoes(req.body);
+
+    if (!pedidoId) {
+        return res.status(400).json({ erro: 'Payload de notificação inválido ou event_type não suportado.' });
+    }
+
+    // Engatilhar fila de processamento do pedidoId na API Integração aqui
+
+    return res.status(200).send();
+});
+*/
 
 export default routes

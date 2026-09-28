@@ -11,6 +11,17 @@ import { PrismaClient, Prisma } from "../../src/generated/prisma/client.ts";
 import type { Plataforma, TipoPedido, EntreguePor, CanalEvento } from "../../src/generated/prisma/enums.ts";
 import { montarPedidoRappi, dispararWebhookNovoPedido as dispararWebhookRappi } from "../rappi/index.ts";
 
+/*
+SOLUÇÃO PROPOSTA PELO GEMINI:
+
+import { montarPedidoUber, dispararWebhookUber, dispararWebhookFalhaUber} from "../uber/index.ts";
+
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient(); (Linha presente na solução GEMINI - REVISAR)
+
+const UBER_CLIENT_SECRET = process.env.UBER_CLIENT_SECRET || 'mock_secret_key';
+*/
+
 const PORTA = Number(process.env["MOCK_API_PORT"] ?? 3333);
 const RESTAURANTE_ID_PADRAO = process.env["MOCK_RESTAURANTE_ID"] ?? "restaurante-mock";
 
@@ -144,6 +155,7 @@ type ItemEntrada = {
   complementos?: Prisma.InputJsonValue[];
 };
 
+// ESSE COMENTÁRIO NÃO É UMA SOLUÇÃO PROPOSTA PELO GEMINI
 /**
  * POST /pedidos
  * {
@@ -230,7 +242,10 @@ async function criarPedido(corpo: any) {
   // plataforma podem ser montados nos módulos mock_backend/<plataforma>.
   const enderecoJson = endereco === Prisma.DbNull ? null : endereco;
   const pedidoRappi = plataforma === "RAPPI" ? montarPedidoRappi({ ...dadosPedido, itens, endereco: enderecoJson, criadoEm: agora }) : null;
-  const payload = pedidoRappi ?? { ...dadosPedido, id: idExterno, endereco: enderecoJson };
+  const pedidoUber = plataforma === "UBER_EATS" ? montarPedidoUber({ ...dadosPedido, itens, endereco: enderecoJson, criadoEm: agora }) : null;
+  
+  const payload = pedidoRappi ?? pedidoUber ?? { ...dadosPedido, id: idExterno, endereco: enderecoJson };
+  
   // Corpo exato do evento: na Rappi é o próprio corpo do webhook (lista de pedidos)
   const payloadEvento = pedidoRappi
     ? [pedidoRappi]
@@ -268,6 +283,91 @@ async function notificarWebhookRappi(eventoId: string, pedidoRappi: Parameters<t
     })
     .catch((erro) => console.error("[rappi] Erro ao registrar tentativa do webhook:", erro));
 }
+
+
+/*
+SOLUÇÃO PROPOSTA PELO GEMINI:
+
+// 1. Controle global de timers para os pedidos do Uber Eats
+export const uberTimers = new Map<string, NodeJS.Timeout>();
+
+export async function notificarWebhookUber(eventoId: string, pedidoIdExterno: string, lojaIdExterno: string, webhookUrl: string): Promise<void> {
+  try {
+    const response = await dispararWebhookUber(eventoId, pedidoIdExterno, webhookUrl, UBER_CLIENT_SECRET);
+
+    if (response.status === 200) {
+      await prisma.evento.update({
+        where: { id: eventoId },
+        data: { ackEm: new Date() }
+      });
+
+      // Iniciar o timer de 11,5 minutos (690.000 ms) para timeout de decisão
+      const timer = setTimeout(async () => {
+        await verificarTimeoutUber(pedidoIdExterno, lojaIdExterno, webhookUrl);
+      }, 690 * 1000);
+
+      uberTimers.set(pedidoIdExterno, timer);
+    }
+  } catch (error) {
+    console.error(`[UBER_EATS] Erro ao processar webhook orders.notification (Evento: ${eventoId}):`, error);
+  }
+}
+
+async function verificarTimeoutUber(pedidoIdExterno: string, lojaIdExterno: string, webhookUrl: string): Promise<void> {
+  try {
+    const pedido = await prisma.pedido.findUnique({
+      where: {
+        plataforma_idExterno: {
+          plataforma: "UBER_EATS",
+          idExterno: pedidoIdExterno
+        }
+      }
+    });
+
+    if (pedido && pedido.status === "CREATED") {
+      const pedidoAtualizado = await prisma.pedido.update({
+        where: { id: pedido.id },
+        data: {
+          status: "FAILED",
+          eventos: {
+            create: {
+              plataforma: "UBER_EATS",
+              tipo: "orders.failure",
+              canal: "WEBHOOK",
+              payload: {
+                tipo: "orders.failure",
+                pedidoId: pedidoIdExterno,
+                status: "FAILED",
+                criadoEm: new Date().toISOString()
+              }
+            }
+          }
+        },
+        include: {
+          eventos: {
+            orderBy: { criadoEm: "desc" },
+            take: 1
+          }
+        }
+      });
+
+      const eventoFalhaId = pedidoAtualizado.eventos[0]!.id;
+      
+      const response = await dispararWebhookFalhaUber(eventoFalhaId, pedidoIdExterno, lojaIdExterno, webhookUrl, UBER_CLIENT_SECRET);
+      
+      if (response.ok) {
+        await prisma.evento.update({
+          where: { id: eventoFalhaId },
+          data: { ackEm: new Date() }
+        });
+      }
+    }
+  } catch (error) {
+    console.error(`[UBER_EATS] Erro ao verificar timeout do pedido ${pedidoIdExterno}:`, error);
+  }
+}
+*/
+
 
 async function listarPedidos(params: URLSearchParams) {
   const where: Prisma.PedidoWhereInput = {};
@@ -351,6 +451,14 @@ async function rotear(req: IncomingMessage, res: ServerResponse) {
   const metodo = req.method ?? "GET";
   let m: RegExpMatchArray | null;
 
+  if (metodo === "POST" && pathname === "/oauth/v2/token") {
+    return enviarJson(res, 200, {
+      access_token: randomUUID(),
+      token_type: "Bearer",
+      expires_in: 2592000
+    });
+  }
+
   if (metodo === "GET" && pathname === "/health") {
     await prisma.$queryRaw`SELECT 1`;
     return enviarJson(res, 200, { ok: true });
@@ -380,6 +488,103 @@ async function rotear(req: IncomingMessage, res: ServerResponse) {
   if ((m = pathname.match(new RegExp(`^/eventos/${UUID}/ack$`))) && metodo === "POST") {
     return enviarJson(res, 200, await confirmarEvento(m[1]!));
   }
+
+  /*
+  SOLUÇÃO PROPOSTA PELO GEMINI:
+
+  if ((m = pathname.match(new RegExp(`^/v2/eats/order/${UUID}$`))) && metodo === "GET") {
+    const pedido = await prisma.pedido.findFirst({
+      where: { 
+        idExterno: m[1], 
+        plataforma: "UBER_EATS" 
+      }
+    });
+
+    if (!pedido) throw new ErroHttp(404, "Pedido não encontrado");
+    
+    return enviarJson(res, 200, pedido.payload);
+  }
+
+  if ((m = pathname.match(new RegExp(`^/v1/eats/orders/${UUID}/accept_pos_order$`))) && metodo === "POST") {
+    const pedidoIdExterno = m[1]!;
+
+    // Limpa/invalida o timer de cancelamento da Etapa 5
+    if (uberTimers.has(pedidoIdExterno)) {
+      clearTimeout(uberTimers.get(pedidoIdExterno));
+      uberTimers.delete(pedidoIdExterno);
+    }
+
+    const pedido = await prisma.pedido.findFirst({
+      where: { idExterno: pedidoIdExterno, plataforma: "UBER_EATS" }
+    });
+
+    if (!pedido) throw new ErroHttp(404, "Pedido não encontrado");
+
+    await prisma.pedido.update({
+      where: { id: pedido.id },
+      data: {
+        status: "ACCEPTED",
+        eventos: {
+          create: {
+            plataforma: "UBER_EATS",
+            tipo: "ACCEPTED",
+            canal: "WEBHOOK",
+            payload: { 
+              tipo: "ACCEPTED", 
+              pedidoId: pedidoIdExterno, 
+              status: "ACCEPTED", 
+              criadoEm: new Date().toISOString() 
+            }
+          }
+        }
+      }
+    });
+
+    res.writeHead(204);
+    return res.end();
+  }
+
+  if ((m = pathname.match(new RegExp(`^/v1/eats/orders/${UUID}/deny_pos_order$`))) && metodo === "POST") {
+    const pedidoIdExterno = m[1]!;
+    const corpo = await lerCorpo(req);
+
+    // Limpa/invalida o timer de cancelamento da Etapa 5
+    if (uberTimers.has(pedidoIdExterno)) {
+      clearTimeout(uberTimers.get(pedidoIdExterno));
+      uberTimers.delete(pedidoIdExterno);
+    }
+
+    const pedido = await prisma.pedido.findFirst({
+      where: { idExterno: pedidoIdExterno, plataforma: "UBER_EATS" }
+    });
+
+    if (!pedido) throw new ErroHttp(404, "Pedido não encontrado");
+
+    await prisma.pedido.update({
+      where: { id: pedido.id },
+      data: {
+        status: "DENIED", // ou FAILED, dependendo da padronização interna
+        eventos: {
+          create: {
+            plataforma: "UBER_EATS",
+            tipo: "DENIED",
+            canal: "WEBHOOK",
+            payload: {
+              tipo: "DENIED",
+              pedidoId: pedidoIdExterno,
+              status: "DENIED",
+              deny_reason: corpo.deny_reason,
+              criadoEm: new Date().toISOString()
+            }
+          }
+        }
+      }
+    });
+
+    res.writeHead(204);
+    return res.end();
+  }
+  */
 
   throw new ErroHttp(404, `Rota não encontrada: ${metodo} ${pathname}`);
 }

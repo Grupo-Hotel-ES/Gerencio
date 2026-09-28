@@ -1,6 +1,7 @@
 // mock_backend/uber/index.ts
 
 import { randomUUID } from "node:crypto";
+import * as crypto from 'crypto';
 
 // ---------------------------------------------------------------------------
 // Formato nativo do Uber Eats (OpenAPI restaurant_order)
@@ -141,4 +142,63 @@ export function montarPedidoUber(dados: DadosPedidoMock): UberOrder {
       created_time: dados.criadoEm.toISOString()
     }
   };
+}
+
+export async function dispararWebhookUber(eventoId: string, pedidoId: string, url: string, clientSecret: string): Promise<Response> {
+    const payload = {
+        event_id: eventoId,
+        event_time: Date.now(),
+        event_type: "orders.notification",
+        meta: {
+            resource_id: pedidoId,
+            status: "pos",
+        },
+        resource_href: `https://api.uber.com/v2/eats/orders/${pedidoId}`
+    };
+
+    const payloadString = JSON.stringify(payload);
+    
+    const signature = crypto
+        .createHmac('sha256', clientSecret)
+        .update(payloadString)
+        .digest('hex');
+
+    return fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Uber-Signature': signature
+        },
+        body: payloadString
+    });
+}
+
+export async function dispararWebhookFalhaUber(eventoId: string, pedidoIdExterno: string, lojaIdExterno: string, url: string, clientSecret: string): Promise<Response> {
+  const payload = {
+    event_id: eventoId,
+    event_time: Date.now(),
+    event_type: "orders.failure",
+    meta: {
+      user_id: lojaIdExterno,
+      resource_id: pedidoIdExterno,
+      status: "FAILED"
+    },
+    resource_href: `https://api.uber.com/v2/eats/order/${pedidoIdExterno}`
+  };
+
+  const payloadString = JSON.stringify(payload);
+
+  const signature = crypto
+    .createHmac("sha256", clientSecret)
+    .update(payloadString)
+    .digest("hex");
+
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Uber-Signature": signature
+    },
+    body: payloadString
+  });
 }
