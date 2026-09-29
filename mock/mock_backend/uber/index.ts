@@ -154,7 +154,7 @@ export async function dispararWebhookUber(eventoId: string, pedidoId: string, ur
       resource_id: pedidoId,
       status: "pos",
     },
-    resource_href: `https://api.uber.com/v2/eats/order/${pedidoId}`
+    resource_href: `http://localhost:3333/v2/eats/order/${pedidoId}`
   };
 
   const payloadString = JSON.stringify(payload);

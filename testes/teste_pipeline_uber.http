@@ -1,0 +1,58 @@
+### Variáveis Globais
+@mockUrl = http://localhost:3333
+@apiIntegracaoUrl = http://localhost:3005
+
+### 1. Criar um Pedido (Simulando o App/Frontend do Mock)
+# Dispara o Etapa 2, 3 e 4 do pipeline.
+# O mock salva no banco e dispara o webhook para a API Integração.
+# A API Integração recebe, valida e faz o GET para buscar os detalhes.
+POST {{mockUrl}}/pedidos
+Content-Type: application/json
+
+{
+  "plataforma": "ubereats",
+  "cliente": {
+    "nome": "João Okita",
+    "telefone": "+5511999999999"
+  },
+  "tipo": "ENTREGA",
+  "entreguePor": "PLATAFORMA",
+  "endereco": {
+    "rua": "Av. Shishima Hifumi",
+    "numero": "2911",
+    "bairro": "Urbanova",
+    "cidade": "São José dos Campos",
+    "cep": "12244-000"
+  },
+  "itens": [
+    {
+      "codigoExterno": "item_123",
+      "nome": "Hambúrguer Artesanal",
+      "quantidade": 2,
+      "precoUnitarioCentavos": 3500
+    }
+  ],
+  "taxaEntregaCentavos": 500
+}
+
+### ATENÇÃO: Pegue o "idExterno" gerado na resposta do request acima para usar abaixo.
+@idPedidoUber = cole_o_id_externo_aqui
+
+### 2. Aceitar o Pedido (Simulando o Painel do Gerêncio)
+# Deve ser disparado antes de dar 11,5 minutos. Cancela o timer e muda para ACCEPTED.
+POST {{mockUrl}}/v1/eats/orders/{{idPedidoUber}}/accept_pos_order
+Content-Type: application/json
+
+{}
+
+### 3. Recusar o Pedido (Simulando o Painel do Gerêncio)
+# Cria um NOVO pedido no Passo 1, cole o novo ID, e dispare esta rota.
+POST {{mockUrl}}/v1/eats/orders/{{idPedidoUber}}/deny_pos_order
+Content-Type: application/json
+
+{
+  "deny_reason": {
+    "type": "ITEM_ISSUE",
+    "info": "Faltou ingrediente"
+  }
+}
