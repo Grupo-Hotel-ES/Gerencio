@@ -1,0 +1,22 @@
+{
+  "name": "@geroncio/api-restaurantes",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../.env src/index.ts",
+    "start": "tsx --env-file-if-exists=../.env src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@geroncio/shared-db": "workspace:*",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.10.2",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  }
+}

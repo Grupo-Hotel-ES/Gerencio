@@ -1,0 +1,86 @@
+@baseUrl = http://localhost:3002/api
+
+### 1. Criar Pedido (POST)
+# @name createPedido
+POST {{baseUrl}}/pedidos
+Content-Type: application/json
+
+{
+  "clienteId": 2,
+  "nomeCliente": "Felipe Freitas D Elia",
+  "restauranteId": 1,
+  "preco": 59.80,
+  "metodoPagamento": "PIX",
+  "app": "iFood",
+  "enderecoDestino": "Cesare Mansueto Giulio Lattes, 1201",
+  "cepDestino": "01310100",
+  "latitude": -23.561684,
+  "longitude": -46.655981,
+  "status": "EM_PREPARO",
+  "itens": [
+    {
+      "produtoId": 1,
+      "quantidade": 2
+    }
+  ]
+}
+
+###
+
+### 2. Listar Todos os Pedidos (GET)
+GET {{baseUrl}}/pedidos
+
+###
+
+### 3. Buscar Pedido por ID (GET)
+GET {{baseUrl}}/pedidos/1
+
+###
+
+### 4. Atualizar Pedido Completo (PUT)
+PUT {{baseUrl}}/pedidos/1
+Content-Type: application/json
+
+{
+  "clienteId": 2,
+  "restauranteId": 1,
+  "preco": 59.80,
+  "metodoPagamento": "PIX",
+  "app": "iFood",
+  "enderecoDestino": "Rua das Flores, 123",
+  "cepDestino": "01310100",
+  "latitude": -23.561684,
+  "longitude": -46.655981,
+  "status": "EM_PREPARO",
+  "itens": [
+    {
+      "produtoId": 1,
+      "quantidade": 2
+    }
+  ]
+}
+
+###
+
+### 5. Atualizar Status do Pedido (PATCH)
+PATCH {{baseUrl}}/pedidos/1
+Content-Type: application/json
+
+{
+  "status": "ENTREGUE"
+}
+
+###
+
+### 6. Deletar Pedido (DELETE)
+DELETE {{baseUrl}}/pedidos/1
+
+###
+
+### 7. Testar ID Inválido (Tratamento de Erro - 400)
+GET {{baseUrl}}/pedidos/abc
+
+###
+
+### 8. Buscar Pedido Inexistente (Tratamento de Erro - 404)
+GET {{baseUrl}}/pedidos/9999

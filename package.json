@@ -1,0 +1,34 @@
+{
+  "name": "Geroncio",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "cd frontend && npx expo start",
+    "db": "cd backend && pnpm db:up",
+    "studio": "cd backend && pnpm db:studio",
+    "db:migrate": "cd backend && pnpm db:migrate",
+    "db:status": "dotenv -e ../../.env -- prisma migrate status",
+    "db:generate": "prisma generate",
+    "backend": "cd backend && pnpm dev",
+    "backend:docker": "cd backend && pnpm docker:up",
+    "mock": "cd mock && pnpm db:up && cd mock_frontend && pnpm start",
+    "mock:studio": "cd mock && pnpm db:studio"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.9.0",
+      "onFail": "download"
+    }
+  },
+  "type": "module",
+  "dependencies": {
+    "express": "catalog:",
+    "npx": "^10.2.2"
+  }
+}

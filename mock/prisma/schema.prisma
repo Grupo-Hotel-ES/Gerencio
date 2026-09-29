@@ -1,0 +1,131 @@
+// Schema do mock das plataformas de delivery.
+// Representa o "mundo externo" (iFood, 99Food, Keeta, Uber Eats, Rappi) e NÃO
+// deve ser compartilhado com packages/shared-db do Gerencio.
+
+// Prisma 7: a URL de conexão fica em prisma.config.ts, e o client é gerado em src/generated.
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Plataforma {
+  IFOOD
+  NOVENTA_NOVE_FOOD
+  KEETA
+  UBER_EATS
+  RAPPI
+
+  @@map("plataforma")
+}
+
+enum TipoPedido {
+  ENTREGA
+  RETIRADA
+
+  @@map("tipo_pedido")
+}
+
+enum EntreguePor {
+  PLATAFORMA
+  LOJA
+
+  @@map("entregue_por")
+}
+
+enum CanalEvento {
+  WEBHOOK
+  POLLING
+
+  @@map("canal_evento")
+}
+
+model Pedido {
+  id             String      @id @default(uuid()) @db.Uuid
+  plataforma     Plataforma
+  /// ID no formato da plataforma (UUID, inteiro, string numérica...). Sempre texto.
+  idExterno      String      @map("id_externo")
+  /// Número curto exibido ao cliente, ex.: "4821"
+  codigoExibicao String      @map("codigo_exibicao")
+  /// ID da loja na plataforma (merchantId, shopId, store_id)
+  lojaIdExterno  String      @map("loja_id_externo")
+  /// Restaurante correspondente no Gerencio (usado só para montar o pedido no formulário)
+  restauranteId  String      @map("restaurante_id")
+  /// Status nativo da plataforma (PLACED, SENT, TAKEN...). Texto porque varia por plataforma.
+  status         String
+  tipo           TipoPedido
+  /// Nulo = pedido imediato
+  agendadoPara   DateTime?   @map("agendado_para") @db.Timestamptz(3)
+  entreguePor    EntreguePor @map("entregue_por")
+
+  /// { nome, telefone, localizador?, cpf? }
+  cliente  Json
+  /// { rua, numero, complemento?, bairro, cidade, uf, cep, referencia?, lat?, lng? } — nulo na retirada
+  endereco Json?
+  /// [{ codigoExterno, nome, quantidade, precoUnitarioCentavos, observacao?, complementos: [...] }]
+  itens    Json
+
+  subtotalCentavos           Int @map("subtotal_centavos")
+  taxaEntregaCentavos        Int @default(0) @map("taxa_entrega_centavos")
+  descontoPlataformaCentavos Int @default(0) @map("desconto_plataforma_centavos")
+  descontoLojaCentavos       Int @default(0) @map("desconto_loja_centavos")
+  totalCentavos              Int @map("total_centavos")
+
+  /// { pagoOnline, metodo, trocoParaCentavos? }
+  pagamento     Json
+  observacao    String?
+  codigoColeta  String?  @map("codigo_coleta")
+  /// Limite para aceite (ex.: 90 s Uber, 6 min Rappi); usado para simular timeout
+  prazoAceiteEm DateTime @map("prazo_aceite_em") @db.Timestamptz(3)
+
+  /// Pedido no formato exato da plataforma, devolvido pelo GET de detalhes
+  payload Json
+
+  criadoEm     DateTime @default(now()) @map("criado_em") @db.Timestamptz(3)
+  atualizadoEm DateTime @updatedAt @map("atualizado_em") @db.Timestamptz(3)
+
+  eventos Evento[]
+
+  @@unique([plataforma, idExterno])
+  @@index([plataforma, status])
+  @@index([plataforma, lojaIdExterno])
+  @@map("pedidos")
+}
+
+model Evento {
+  /// ID do evento — usado pelo adapter do Gerencio para deduplicar
+  id         String      @id @default(uuid()) @db.Uuid
+  pedidoId   String      @map("pedido_id") @db.Uuid
+  pedido     Pedido      @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  plataforma Plataforma
+  /// Código nativo: PLACED, 1001, orders.notification, NEW_ORDER, canceled_with_charge...
+  tipo       String
+  /// Corpo exato enviado (webhook) ou retornado (polling)
+  payload    Json
+  canal      CanalEvento
+
+  /// Polling retorna apenas eventos com ackEm nulo
+  ackEm DateTime? @map("ack_em") @db.Timestamptz(3)
+
+  /// Controle de envio/reenvio de webhook
+  tentativas         Int       @default(0)
+  ultimoStatusHttp   Int?      @map("ultimo_status_http")
+  proximaTentativaEm DateTime? @map("proxima_tentativa_em") @db.Timestamptz(3)
+
+  /// Preenchido quando o evento é uma duplicata proposital de outro
+  duplicadoDeId String?  @map("duplicado_de") @db.Uuid
+  duplicadoDe   Evento?  @relation("EventoDuplicado", fields: [duplicadoDeId], references: [id], onDelete: SetNull)
+  duplicatas    Evento[] @relation("EventoDuplicado")
+
+  /// Pode ser definido no passado/futuro para simular eventos fora de ordem
+  criadoEm DateTime @default(now()) @map("criado_em") @db.Timestamptz(3)
+
+  @@index([plataforma, canal, ackEm])
+  @@index([pedidoId])
+  @@index([canal, proximaTentativaEm])
+  @@map("eventos")
+}
+

@@ -1,0 +1,96 @@
+@baseUrl = http://localhost:3004
+
+### --- PRODUTOS ---
+
+### 1. Criar Produto (POST)
+# @name createProduto
+POST {{baseUrl}}/produtos
+Content-Type: application/json
+
+{
+  "nome": "Espetinho de carne",
+  "preco": 29.90,
+  "restauranteId": 1
+}
+
+###
+
+### 2. Listar Todos os Produtos (GET)
+GET {{baseUrl}}/produtos
+
+###
+
+### 3. Buscar Produto por ID (GET)
+GET {{baseUrl}}/produtos/1
+
+###
+
+### 4. Atualizar Produto Completo (PUT)
+PUT {{baseUrl}}/produtos/1
+Content-Type: application/json
+
+{
+  "nome": "Espetinho de frango",
+  "preco": 34.90,
+  "restauranteId": 1
+}
+
+###
+
+### 5. Atualizar Produto Parcial (PATCH)
+PATCH {{baseUrl}}/produtos/1
+Content-Type: application/json
+
+{
+  "preco": 32.50
+}
+
+###
+
+### 6. Deletar Produto (DELETE)
+DELETE {{baseUrl}}/produtos/1
+
+###
+
+### 7. Testar ID Inválido (Tratamento de Erro - 400)
+GET {{baseUrl}}/produtos/abc
+
+###
+
+### 8. Buscar Produto Inexistente (Tratamento de Erro - 404)
+GET {{baseUrl}}/produtos/9999
+
+###
+
+### --- MAPEAMENTO APP ---
+
+### 9. Criar Mapeamento (POST)
+# @name createMapeamento
+POST {{baseUrl}}/mapeamentos
+Content-Type: application/json
+
+{
+  "produtoId": 1,
+  "plataforma": "IFOOD",
+  "idExternoApp": "SKU-IFOOD-123"
+}
+
+###
+
+### 10. Listar Todos os Mapeamentos (GET)
+GET {{baseUrl}}/mapeamentos
+
+###
+
+### 11. Buscar Mapeamento por Plataforma e ID Externo (GET - Usado na Integração)
+GET {{baseUrl}}/mapeamentos/buscar?plataforma=IFOOD&idExternoApp=SKU-IFOOD-123
+
+###
+
+### 12. Deletar Mapeamento (DELETE)
+DELETE {{baseUrl}}/mapeamentos/1
+
+###
+
+### 13. Buscar Mapeamento Inexistente (Tratamento de Erro - 404)
+GET {{baseUrl}}/mapeamentos/buscar?plataforma=IFOOD&idExternoApp=NAO_EXISTE

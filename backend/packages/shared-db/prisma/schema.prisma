@@ -1,0 +1,152 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StatusEntregador {
+  disponivel
+  em_entrega
+  inativo
+}
+
+enum StatusPedido {
+  em_preparo
+  saiu_para_entrega
+  entregue
+  cancelado
+}
+
+enum TipoFuncionario {
+  PROPRIETARIO
+  ENTREGADOR
+  CAIXA
+}
+
+model Restaurante {
+  id          Int                    @id @default(autoincrement())
+  cnpj        String                 @unique
+  nome        String
+  email       String
+  telefone    String
+  cep         String
+  cidade      String
+  endereco    String
+  credenciais CredencialPlataforma[]
+  vinculos    VinculoFuncionario[]
+  produtos    Produto[]
+}
+
+model CredencialPlataforma {
+  id            Int         @id @default(autoincrement())
+  plataforma    String
+  clientId      String      @map("client_id")
+  accessToken   String      @map("access_token")
+  refreshToken  String      @map("refresh_token")
+  restauranteId Int         @map("restaurante_id")
+  restaurante   Restaurante @relation(fields: [restauranteId], references: [id], onDelete: Cascade)
+}
+
+model Funcionario {
+  id       Int                  @id @default(autoincrement())
+  nome     String
+  cpf      String               @unique
+  telefone String
+  email    String
+  tipo     TipoFuncionario      @default(ENTREGADOR)
+  status   StatusEntregador?
+  vinculos VinculoFuncionario[]
+  entregas Entrega[]
+}
+
+model VinculoFuncionario {
+  restauranteId Int         @map("restaurante_id")
+  funcionarioId Int         @map("funcionario_id")
+  dataInicio    DateTime    @map("data_inicio")
+  dataFim       DateTime?   @map("data_fim")
+  restaurante   Restaurante @relation(fields: [restauranteId], references: [id], onDelete: Cascade)
+  funcionario   Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+
+  @@id([restauranteId, funcionarioId])
+}
+
+model Produto {
+  id            Int              @id @default(autoincrement())
+  nome          String
+  preco         Decimal          @db.Decimal(10, 2)
+  restauranteId Int              @map("restaurante_id")
+  restaurante   Restaurante      @relation(fields: [restauranteId], references: [id], onDelete: Cascade)
+  mapeamentos   MapeamentoApp[]
+  syncLogs      EstoqueSyncLog[]
+  itensPedido   ItemPedido[]
+}
+
+model MapeamentoApp {
+  id           Int     @id @default(autoincrement())
+  plataforma   String
+  idExternoApp String  @map("id_externo_app")
+  produtoId    Int     @map("produto_id")
+  produto      Produto @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+}
+
+model EstoqueSyncLog {
+  id            Int      @id @default(autoincrement())
+  plataforma    String
+  status        String
+  mensagemErro  String?  @map("mensagem_erro")
+  dataTentativa DateTime @default(now()) @map("data_tentativa")
+  produtoId     Int      @map("produto_id")
+  produto       Produto  @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+}
+
+model Cliente {
+  id          Int      @id @default(autoincrement())
+  nomeCliente String   @map("nome_cliente")
+  endereco    String
+  telefone    String?
+  email       String?
+  cpf         String?  @unique
+  criadoEm    DateTime @default(now()) @map("criado_em")
+  pedidos     Pedido[]
+}
+
+model Pedido {
+  id              Int          @id @default(autoincrement())
+  nomeCliente     String?      @map("nome_cliente") // Add este campo
+  clienteId       Int?         @map("cliente_id")
+  cliente         Cliente?     @relation(fields: [clienteId], references: [id])
+  preco           Decimal      @db.Decimal(10, 2)
+  metodoPagamento String       @map("metodo_pagamento")
+  app             String
+  enderecoDestino String       @map("endereco_destino")
+  cepDestino      String       @map("cep_destino")
+  latitude        Float?
+  longitude       Float?
+  status          StatusPedido @default(em_preparo)
+  itens           ItemPedido[]
+  entrega         Entrega?
+}
+
+model ItemPedido {
+  pedidoId   Int     @map("pedido_id")
+  produtoId  Int     @map("produto_id")
+  quantidade Int
+  pedido     Pedido  @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  produto    Produto @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+
+  @@id([pedidoId, produtoId])
+}
+
+model Entrega {
+  id           Int          @id @default(autoincrement())
+  pedidoId     Int          @unique @map("pedido_id")
+  entregadorId Int?         @map("entregador_id")
+  custoEntrega Decimal      @map("custo_entrega") @db.Decimal(10, 2)
+  dataHora     DateTime     @default(now()) @map("data_hora")
+  pedido       Pedido       @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  entregador   Funcionario? @relation(fields: [entregadorId], references: [id])
+}

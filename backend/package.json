@@ -1,0 +1,36 @@
+{
+  "name": "@geroncio/backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend do Gerôncio em microsserviços (pnpm workspace)",
+  "license": "ISC",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --parallel --filter \"./api-*\" dev",
+    "start": "pnpm --parallel --filter \"./api-*\" start",
+    "typecheck": "pnpm -r typecheck",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose stop postgres",
+    "db:generate": "prisma generate --schema packages/shared-db/prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema packages/shared-db/prisma/schema.prisma",
+    "db:deploy": "prisma migrate deploy --schema packages/shared-db/prisma/schema.prisma",
+    "db:studio": "prisma studio --schema packages/shared-db/prisma/schema.prisma"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.24.0",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@11.24.0",
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prisma": "5.22.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  }
+}
