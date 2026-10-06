@@ -29,6 +29,7 @@
   "type": "module",
   "dependencies": {
     "express": "catalog:",
+    "mock": "^0.1.1",
     "npx": "^10.2.2"
   }
 }

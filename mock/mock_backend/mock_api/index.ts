@@ -10,6 +10,11 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, Prisma } from "../../src/generated/prisma/client.ts";
 import type { Plataforma, TipoPedido, EntreguePor, CanalEvento } from "../../src/generated/prisma/enums.ts";
 import { montarPedidoRappi, dispararWebhookNovoPedido as dispararWebhookRappi } from "../rappi/index.ts";
+import {
+  montarPedido99Food,
+  montarEventoNovoPedido99Food,
+  dispararWebhookNovoPedido as dispararWebhook99Food,
+} from "../99/index.ts";
 
 const PORTA = Number(process.env["MOCK_API_PORT"] ?? 3333);
 const RESTAURANTE_ID_PADRAO = process.env["MOCK_RESTAURANTE_ID"] ?? "restaurante-mock";
@@ -226,14 +231,28 @@ async function criarPedido(corpo: any) {
     prazoAceiteEm: new Date(agora.getTime() + config.prazoAceiteSegundos * 1000),
   };
 
-  // Payload "nativo" devolvido no GET de detalhes. Os formatos exatos de cada
-  // plataforma podem ser montados nos módulos mock_backend/<plataforma>.
-  const enderecoJson = endereco === Prisma.DbNull ? null : endereco;
-  const pedidoRappi = plataforma === "RAPPI" ? montarPedidoRappi({ ...dadosPedido, itens, endereco: enderecoJson, criadoEm: agora }) : null;
-  const payload = pedidoRappi ?? { ...dadosPedido, id: idExterno, endereco: enderecoJson };
-  // Corpo exato do evento: na Rappi é o próprio corpo do webhook (lista de pedidos)
-  const payloadEvento = pedidoRappi
-    ? [pedidoRappi]
+ // Payload "nativo" devolvido no GET de detalhes. Os formatos exatos de cada
+// plataforma podem ser montados nos módulos mock_backend/<plataforma>.
+const enderecoJson = endereco === Prisma.DbNull ? null : endereco;
+
+const pedidoRappi = plataforma === "RAPPI" 
+  ? montarPedidoRappi({ ...dadosPedido, itens, endereco: enderecoJson, criadoEm: agora }) 
+  : null;
+
+const pedido99 = plataforma === "NOVENTA_NOVE_FOOD" 
+  ? montarPedido99Food({ ...dadosPedido, itens, endereco: enderecoJson, criadoEm: agora }) 
+  : null;
+
+const payload = pedidoRappi ?? pedido99 ?? { ...dadosPedido, id: idExterno, endereco: enderecoJson };
+
+// Corpo exato do evento:
+//   - Rappi: o próprio corpo do webhook (lista de pedidos)
+//   - 99Food: evento enxuto (só o orderId)
+//   - Outros: payload genérico
+const payloadEvento = pedidoRappi
+  ? [pedidoRappi]
+  : pedido99
+    ? montarEventoNovoPedido99Food(pedido99)
     : { tipo: config.tipoEventoNovoPedido, pedidoId: idExterno, lojaId: lojaIdExterno, criadoEm: agora.toISOString() };
 
   const pedido = await prisma.pedido.create({
@@ -254,7 +273,8 @@ async function criarPedido(corpo: any) {
   });
 
   if (pedidoRappi) void notificarWebhookRappi(pedido.eventos[0]!.id, pedidoRappi);
-  return pedido;
+if (pedido99) void notificarWebhook99Food(pedido.eventos[0]!.id, pedido99);
+return pedido;
 }
 
 /** Dispara o webhook em segundo plano e registra a tentativa no evento. */
@@ -267,6 +287,18 @@ async function notificarWebhookRappi(eventoId: string, pedidoRappi: Parameters<t
       data: { tentativas: { increment: 1 }, ultimoStatusHttp: resultado.statusHttp, ...(resultado.ok ? { ackEm: new Date() } : {}) },
     })
     .catch((erro) => console.error("[rappi] Erro ao registrar tentativa do webhook:", erro));
+}
+
+/** Dispara o webhook do 99Food em segundo plano e registra a tentativa no evento. */
+async function notificarWebhook99Food(eventoId: string, pedido99: Parameters<typeof dispararWebhook99Food>[0]) {
+  const resultado = await dispararWebhook99Food(pedido99);
+  if (!resultado.ok) console.warn(`[99food] Webhook falhou (${resultado.statusHttp ?? resultado.erro})`);
+  await prisma.evento
+    .update({
+      where: { id: eventoId },
+      data: { tentativas: { increment: 1 }, ultimoStatusHttp: resultado.statusHttp, ...(resultado.ok ? { ackEm: new Date() } : {}) },
+    })
+    .catch((erro) => console.error("[99food] Erro ao registrar tentativa do webhook:", erro));
 }
 
 async function listarPedidos(params: URLSearchParams) {
