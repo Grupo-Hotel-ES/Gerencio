@@ -1,0 +1,70 @@
+### Variáveis Globais
+@mockUrl = http://localhost:3333
+@apiIntegracaoUrl = http://localhost:3005
+
+### ==========================================
+### TESTE A: CRIAR PEDIDO E DISPARAR WEBHOOK
+### ==========================================
+
+### 1. Criar um Pedido (Simulando o cliente Marina no App do Uber Eats)
+# O mock salva no banco, gera o HMAC-SHA256 e dispara o webhook para a API Integração.
+POST {{mockUrl}}/pedidos
+Content-Type: application/json
+
+{
+  "plataforma": "ubereats",
+  "cliente": {
+    "nome": "Marina Silva Costa",
+    "telefone": "11944445555"
+  },
+  "tipo": "ENTREGA",
+  "entreguePor": "PLATAFORMA",
+  "endereco": {
+    "rua": "Av. Cassiano Ricardo",
+    "numero": "120",
+    "bairro": "Jardim Aquarius",
+    "cidade": "São José dos Campos",
+    "cep": "12240-000"
+  },
+  "itens": [
+    {
+      "codigoExterno": "UBER-MARGHERITA-1",
+      "nome": "Pizza Margherita",
+      "quantidade": 1,
+      "precoUnitarioCentavos": 5500
+    }
+  ],
+  "taxaEntregaCentavos": 650
+}
+
+
+### ATENÇÃO: Pegue o "idExterno" gerado na resposta do request acima para usar abaixo.
+@idPedidoUber = 659c9300-01e9-4387-9f9b-898fd6cf8715
+
+
+### ==========================================
+### TESTE B: CAMINHO FELIZ (ACEITAR)
+### ==========================================
+
+### 2. Aceitar o Pedido (Simulando um clique de "Aceitar" no Painel do Gerêncio)
+POST {{mockUrl}}/v1/eats/orders/{{idPedidoUber}}/accept_pos_order
+Content-Type: application/json
+
+{}
+
+
+### ==========================================
+### TESTE C: CAMINHO TRISTE (RECUSAR)
+### ==========================================
+
+### 3. Recusar o Pedido (Simulando um clique de "Recusar" no Painel do Gerêncio)
+# Lembre-se: Para testar a recusa, dispare o Passo 1 novamente para criar um NOVO pedido e use o novo ID.
+POST {{mockUrl}}/v1/eats/orders/{{idPedidoUber}}/deny_pos_order
+Content-Type: application/json
+
+{
+  "deny_reason": {
+    "type": "ITEM_ISSUE",
+    "info": "Forno quebrou"
+  }
+}

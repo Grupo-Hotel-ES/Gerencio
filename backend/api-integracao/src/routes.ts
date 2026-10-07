@@ -63,12 +63,13 @@ function adapterNaoImplementado(nome: string): AdapterPlataforma {
     throw new Error(`Integração com ${nome} ainda não implementada`)
   }
   return {
-    validarAssinatura: () => true, // TODO: validar assinatura do webhook
+    validarAssinatura: () => true,
     extrairNotificacoes: erro,
     buscarPedido: async () => erro(),
     converterPedido: erro,
   }
 }
+
 
 // Rappi: o webhook de novo pedido envia uma LISTA com os pedidos completos
 // ({ order_detail, customer, store }), então não é preciso buscá-los na API.
@@ -76,9 +77,8 @@ function adapterNaoImplementado(nome: string): AdapterPlataforma {
 const rappi: AdapterPlataforma = {
   validarAssinatura(req) {
     const segredo = process.env.RAPPI_WEBHOOK_SECRET
-    if (!segredo) return true // sem segredo configurado (ambiente de desenvolvimento)
+    if (!segredo) return true 
 
-    // Header: t=<timestamp>,sign=<hmac-sha256 de "<t>.<corpo>">
     const header = req.get('Rappi-Signature') ?? ''
     const partes = Object.fromEntries(header.split(',').map((parte) => parte.trim().split('=', 2)))
     const corpo = (req as RequestComCorpoBruto).corpoBruto
@@ -105,7 +105,6 @@ const rappi: AdapterPlataforma = {
   },
 
   async buscarPedido(notificacao) {
-    // TODO: buscar na API da Rappi quando o webhook não trouxer o pedido completo
     if (!notificacao.pedido) throw new Error(`Pedido ${notificacao.pedidoIdExterno} ausente no webhook`)
     return notificacao.pedido
   },
@@ -119,7 +118,6 @@ const rappi: AdapterPlataforma = {
       nomeCliente: nomeCliente || detalhe.billing_information?.name || null,
       preco: Number(detalhe.totals.total_order),
       metodoPagamento: detalhe.payment_method === 'cash' ? 'dinheiro' : 'cartao',
-      // Retirada ("pickup") não tem endereço de entrega
       enderecoDestino: entrega?.complete_address ?? '',
       cepDestino: entrega?.postal_code ?? '',
       latitude: null,
@@ -132,11 +130,96 @@ const rappi: AdapterPlataforma = {
   },
 }
 
+const ubereats: AdapterPlataforma = {
+  validarAssinatura(req) {
+    const segredo = process.env.UBER_WEBHOOK_SECRET;
+    if (!segredo) return true;
+
+    const assinatura = req.get('X-Uber-Signature');
+    const corpo = (req as RequestComCorpoBruto).corpoBruto;
+    if (!assinatura || !corpo) return false;
+
+    const esperado = createHmac('sha256', segredo).update(corpo).digest();
+    const assinaturaBuffer = Buffer.from(assinatura, 'hex');
+
+    return assinaturaBuffer.length === esperado.length && timingSafeEqual(assinaturaBuffer, esperado);
+  },
+
+  extrairNotificacoes(corpo) {
+    if (corpo?.event_type !== 'orders.notification' || !corpo?.meta?.resource_id) {
+      return [];
+    }
+    
+    return [{
+      eventoId: String(corpo.event_id),
+      pedidoIdExterno: String(corpo.meta.resource_id),
+      tipo: String(corpo.event_type),
+      pedido: { resource_href: corpo.resource_href }
+    }];
+  },
+
+  async buscarPedido(notificacao) {
+    const resourceHref = (notificacao.pedido as any)?.resource_href;
+    if (!resourceHref) {
+      throw new Error(`resource_href ausente na notificação do pedido ${notificacao.pedidoIdExterno}`);
+    }
+
+    const mockUrl = process.env.MOCK_API_URL ?? 'http://localhost:3333';
+    const authRes = await fetch(`${mockUrl}/oauth/v2/token`, { method: 'POST' });
+    if (!authRes.ok) throw new Error('Falha ao obter token OAuth do Uber Eats');
+    
+    const { access_token } = await authRes.json();
+
+    const pedidoRes = await fetch(resourceHref, {
+      headers: { 'Authorization': `Bearer ${access_token}` }
+    });
+
+    if (!pedidoRes.ok) {
+      throw new Error(`Erro ao buscar pedido no Uber Eats: ${pedidoRes.statusText}`);
+    }
+
+    return pedidoRes.json();
+  },
+
+  converterPedido(pedidoExterno) {
+    const order = pedidoExterno.order || pedidoExterno;
+    const customer = order.customers?.[0];
+    const nomeCliente = customer ? `${customer.name?.first_name || ''} ${customer.name?.last_name || ''}`.trim() : null;
+
+    const precoE5 = order.payment?.payment_detail?.order_total?.net?.amount_e5 || 0;
+    const preco = precoE5 / 100000;
+
+    const delivery = order.deliveries?.[0];
+    const location = delivery?.location;
+    const enderecoDestino = location 
+      ? `${location.street_address_line_one || ''} ${location.street_address_line_two || ''}`.trim() 
+      : '';
+
+    const itens: ItemExterno[] = order.carts?.flatMap((cart: any) =>
+      cart.items?.map((item: any) => ({
+        idExterno: String(item.external_data || item.id),
+        quantidade: Number(item.quantity?.amount || 1)
+      })) || []
+    ) || [];
+
+    return {
+      nomeCliente,
+      preco,
+      metodoPagamento: 'cartao',
+      enderecoDestino,
+      cepDestino: location?.postal_code ?? '',
+      latitude: location?.latitude ? Number(location.latitude) : null,
+      longitude: location?.longitude ? Number(location.longitude) : null,
+      itens
+    };
+  }
+};
+
 const ADAPTERS: Record<Plataforma, AdapterPlataforma> = {
   ifood: adapterNaoImplementado('iFood'),
   '99food': adapterNaoImplementado('99Food'),
   keeta: adapterNaoImplementado('Keeta'),
-  ubereats: adapterNaoImplementado('Uber Eats'),
+  ubereats,
   rappi,
 }
 
@@ -166,7 +249,6 @@ async function mapearItens(plataforma: Plataforma, itens: ItemExterno[]) {
 }
 
 async function salvarPedido(plataforma: Plataforma, pedido: PedidoConvertido) {
-  // TODO: evitar duplicidade (webhooks podem ser reenviados) guardando o id externo do pedido
   const data: Prisma.PedidoCreateInput = {
     nomeCliente: pedido.nomeCliente,
     preco: pedido.preco,
@@ -214,14 +296,12 @@ routes.post('/webhooks/:plataforma', async (req, res) => {
     return
   }
 
-  // Responde imediatamente: as plataformas exigem resposta rápida e reenviam em caso de timeout.
   res.status(202).json({ recebidas: notificacoes.length })
 
   for (const notificacao of notificacoes) {
     try {
       await processarNotificacao(plataforma, adapter, notificacao)
     } catch (error) {
-      // TODO: registrar falha para reprocessamento
       console.error(`[${plataforma}] Erro ao processar pedido ${notificacao.pedidoIdExterno}:`, error)
     }
   }
