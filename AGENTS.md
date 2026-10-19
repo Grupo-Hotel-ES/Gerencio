@@ -22,6 +22,7 @@ O Gerôncio centraliza pedidos de várias plataformas de delivery (iFood, Rappi,
 │   ├── api-restaurantes/   # :3003  CRUD de restaurantes
 │   ├── api-produtos/       # :3004  produtos e mapeamentos produto ↔ id externo da plataforma
 │   ├── api-integracao/     # :3005  webhooks/polling das plataformas de delivery
+│   ├── chatbot/            # :5678  n8n (workflows do chatbot)
 │   └── packages/shared-db/ # Prisma schema, migrations e cliente compartilhado
 ├── frontend/         # App React Native + Expo (expo-router), web e mobile
 ├── mock/             # Simulador das plataformas de delivery (API + banco + formulário web)
@@ -95,6 +96,10 @@ routes.get('/pedidos/:id', async (req, res) => {
 - `Decimal` (preços) chega ao frontend como **string** no JSON; converta com `Number(...)`.
 - Status de pedido: `novo → em_preparo → pronto → saiu_para_entrega → entregue` (ou `cancelado`).
 - Variáveis de ambiente ficam em `backend/.env` (carregado por `--env-file-if-exists`). `DATABASE_URL` padrão: `postgresql://geroncio:geroncio_dev@localhost:5432/geroncio`.
+
+### Chatbot (n8n)
+
+`chatbot/Dockerfile` estende a imagem oficial `n8nio/n8n` com a versão fixada em `ARG N8N_VERSION`. No compose, o serviço `chatbot` expõe o editor em http://localhost:5678 e guarda os dados (workflows, credenciais, chave de criptografia) no volume `geroncio_n8ndata`, usando o SQLite interno. Não aponte o n8n para o Postgres do Prisma: as tabelas dele quebrariam o `prisma migrate`. Dentro do compose, os workflows chamam as APIs pelo nome do serviço (`http://api-pedidos:3002/api`).
 
 ### Integração com plataformas
 
