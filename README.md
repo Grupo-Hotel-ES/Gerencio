@@ -1,5 +1,5 @@
 
-# Gerôncio
+# Gerêncio
 
 **Gerenciamento automático de estoque, pedidos e entregas para restaurantes.**
 

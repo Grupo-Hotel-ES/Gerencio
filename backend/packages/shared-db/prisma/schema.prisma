@@ -15,7 +15,9 @@ enum StatusEntregador {
 }
 
 enum StatusPedido {
+  novo
   em_preparo
+  pronto
   saiu_para_entrega
   entregue
   cancelado
@@ -25,6 +27,14 @@ enum TipoFuncionario {
   PROPRIETARIO
   ENTREGADOR
   CAIXA
+}
+
+enum StatusEventoIntegracao {
+  pendente
+  processando
+  processado
+  falhou
+  erro
 }
 
 model Restaurante {
@@ -116,6 +126,7 @@ model Cliente {
 
 model Pedido {
   id              Int          @id @default(autoincrement())
+  pedidoExternoId String?      @map("pedido_externo_id")
   nomeCliente     String?      @map("nome_cliente") // Add este campo
   clienteId       Int?         @map("cliente_id")
   cliente         Cliente?     @relation(fields: [clienteId], references: [id])
@@ -126,9 +137,40 @@ model Pedido {
   cepDestino      String       @map("cep_destino")
   latitude        Float?
   longitude       Float?
-  status          StatusPedido @default(em_preparo)
+  status          StatusPedido @default(novo)
+  criadoEm        DateTime     @default(now()) @map("criado_em")
   itens           ItemPedido[]
   entrega         Entrega?
+  eventosIntegracao EventoIntegracao[]
+
+  @@unique([app, pedidoExternoId])
+}
+
+/// Registro durável das notificações recebidas das plataformas externas.
+/// A combinação da plataforma com o evento e com o pedido protege contra
+/// reentregas do mesmo webhook antes de qualquer pedido ser criado.
+model EventoIntegracao {
+  id                       Int                    @id @default(autoincrement())
+  plataforma               String
+  eventoId                 String                 @map("evento_id")
+  pedidoIdExterno          String                 @map("pedido_id_externo")
+  lojaIdExterno            String?                @map("loja_id_externo")
+  tipo                     String
+  payload                  Json
+  status                   StatusEventoIntegracao @default(pendente)
+  tentativas               Int                    @default(0)
+  proximaTentativaEm       DateTime               @default(now()) @map("proxima_tentativa_em")
+  processamentoIniciadoEm  DateTime?              @map("processamento_iniciado_em")
+  ultimoErro               String?                @map("ultimo_erro")
+  processadoEm             DateTime?              @map("processado_em")
+  pedidoId                 Int?                   @map("pedido_id")
+  pedido                   Pedido?                @relation(fields: [pedidoId], references: [id], onDelete: SetNull)
+  criadoEm                 DateTime               @default(now()) @map("criado_em")
+  atualizadoEm             DateTime               @updatedAt @map("atualizado_em")
+
+  @@unique([plataforma, eventoId])
+  @@unique([plataforma, pedidoIdExterno, tipo])
+  @@index([status, proximaTentativaEm])
 }
 
 model ItemPedido {

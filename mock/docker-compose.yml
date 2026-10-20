@@ -27,6 +27,13 @@ services:
     environment:
       MOCK_DATABASE_URL: postgresql://${MOCK_DB_USER:-mock}:${MOCK_DB_PASSWORD:-mock}@mock-delivery-db:5432/${MOCK_DB_NAME:-mock_delivery}?schema=public
       MOCK_API_PORT: 3333
+      # Dentro do container, localhost é o próprio mock: os webhooks vão para a api-integracao no host
+      IFOOD_WEBHOOK_URL: ${GERENCIO_INTEGRACAO_URL:-http://host.docker.internal:3005}/api/webhooks/ifood
+      RAPPI_WEBHOOK_URL: ${GERENCIO_INTEGRACAO_URL:-http://host.docker.internal:3005}/api/webhooks/rappi
+      UBER_WEBHOOK_URL: ${GERENCIO_INTEGRACAO_URL:-http://host.docker.internal:3005}/api/webhooks/ubereats
+      NOVENTA_NOVE_FOOD_WEBHOOK_URL: ${GERENCIO_INTEGRACAO_URL:-http://host.docker.internal:3005}/api/webhooks/99food
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${MOCK_API_PORT:-3333}:3333"
     depends_on:

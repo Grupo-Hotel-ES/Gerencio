@@ -1,7 +1,7 @@
 // API do mock: recebe os pedidos montados no mock_frontend e grava no banco do mock
 // (Pedido + Evento inicial), simulando o "mundo externo" das plataformas de delivery.
 //
-// Executar a partir de mock/:  pnpm api   (Node >= 22.18 roda TypeScript direto)
+// Executar a partir de mock/:   pnpm api   (Node >= 22.18 roda TypeScript direto)
 
 import "dotenv/config";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -9,9 +9,22 @@ import { randomUUID } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, Prisma } from "../../src/generated/prisma/client.ts";
 import type { Plataforma, TipoPedido, EntreguePor, CanalEvento } from "../../src/generated/prisma/enums.ts";
+import { montarPedidoRappi, dispararWebhookNovoPedido as dispararWebhookRappi } from "../rappi/index.ts";
+import { montarPedidoIFood } from "../ifood/index.ts";
+
+import { montarPedidoUber, dispararWebhookUber, dispararWebhookFalhaUber } from "../uber/index.ts";
+
+import {
+  montarPedido99Food,
+  montarEventoNovoPedido99Food,
+  dispararWebhookNovoPedido as dispararWebhook99Food,
+} from "../99/index.ts";
 
 const PORTA = Number(process.env["MOCK_API_PORT"] ?? 3333);
 const RESTAURANTE_ID_PADRAO = process.env["MOCK_RESTAURANTE_ID"] ?? "restaurante-mock";
+const UBER_CLIENT_SECRET = process.env["UBER_CLIENT_SECRET"] || 'mock_secret_key';
+
+export const uberTimers = new Map<string, NodeJS.Timeout>();
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env["MOCK_DATABASE_URL"] }),
@@ -59,21 +72,20 @@ const PLATAFORMAS: Record<Plataforma, ConfigPlataforma> = {
     statusInicial: "CREATED",
     tipoEventoNovoPedido: "orders.notification",
     canal: "WEBHOOK",
-    prazoAceiteSegundos: 90,
+    prazoAceiteSegundos: 690,
     lojaIdPadrao: "uber-loja-mock",
     gerarIdExterno: () => randomUUID(),
   },
   RAPPI: {
     statusInicial: "SENT",
     tipoEventoNovoPedido: "NEW_ORDER",
-    canal: "POLLING",
+    canal: "WEBHOOK",
     prazoAceiteSegundos: 6 * 60,
     lojaIdPadrao: "rappi-loja-mock",
     gerarIdExterno: () => String(Math.floor(Math.random() * 1e8)),
   },
 };
 
-// Aceita tanto o enum quanto os valores usados no <select> do frontend ("ifood", "99 food", "uber eats"...)
 function normalizarPlataforma(valor: unknown): Plataforma | null {
   if (typeof valor !== "string") return null;
   const chave = valor.trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -143,19 +155,6 @@ type ItemEntrada = {
   complementos?: Prisma.InputJsonValue[];
 };
 
-/**
- * POST /pedidos
- * {
- *   plataforma: "ifood" | "99 food" | "uber eats" | "keeta" | "rappi" | enum,
- *   cliente: { nome, telefone?, cpf? } | string,
- *   endereco?: { rua, numero, ... } | string,   // obrigatório quando tipo = ENTREGA
- *   itens: [{ codigoExterno?, nome, quantidade, precoUnitarioCentavos, observacao?, complementos? }],
- *   tipo?: "ENTREGA" | "RETIRADA", entreguePor?: "PLATAFORMA" | "LOJA",
- *   taxaEntregaCentavos?, descontoPlataformaCentavos?, descontoLojaCentavos?,
- *   pagamento?: { pagoOnline, metodo, trocoParaCentavos? },
- *   observacao?, agendadoPara?, restauranteId?, lojaIdExterno?
- * }
- */
 async function criarPedido(corpo: any) {
   const plataforma = normalizarPlataforma(corpo.plataforma);
   if (!plataforma) throw new ErroHttp(400, `Plataforma inválida: ${JSON.stringify(corpo.plataforma)}`);
@@ -225,11 +224,46 @@ async function criarPedido(corpo: any) {
     prazoAceiteEm: new Date(agora.getTime() + config.prazoAceiteSegundos * 1000),
   };
 
-  // Payload "nativo" devolvido no GET de detalhes. Os formatos exatos de cada
-  // plataforma podem ser montados nos módulos mock_backend/<plataforma>.
-  const payload = { ...dadosPedido, id: idExterno, endereco: endereco === Prisma.DbNull ? null : endereco };
 
-  return prisma.pedido.create({
+ // Payload "nativo" devolvido no GET de detalhes. Os formatos exatos de cada
+// plataforma podem ser montados nos módulos mock_backend/<plataforma>.
+const enderecoJson = endereco === Prisma.DbNull ? null : endereco;
+
+const pedidoRappi = plataforma === "RAPPI"
+  ? montarPedidoRappi({ ...dadosPedido, itens, endereco: enderecoJson, criadoEm: agora })
+  : null;
+
+const pedidoIFood = plataforma === "IFOOD"
+  ? montarPedidoIFood({ ...dadosPedido, itens, endereco: enderecoJson, criadoEm: agora })
+  : null;
+
+const pedido99 = plataforma === "NOVENTA_NOVE_FOOD"
+  ? montarPedido99Food({ ...dadosPedido, itens, endereco: enderecoJson, criadoEm: agora })
+  : null;
+
+const pedidoUber = plataforma === "UBER_EATS"
+  ? montarPedidoUber({ ...dadosPedido, itens, endereco: enderecoJson, criadoEm: agora })
+  : null;
+
+const payload = pedidoRappi ?? pedidoIFood ?? pedido99 ?? pedidoUber ?? { ...dadosPedido, id: idExterno, endereco: enderecoJson };
+
+// Corpo exato do evento:
+const payloadEvento = pedidoRappi
+  ? [pedidoRappi]
+  : pedidoIFood
+  ? {
+      id: randomUUID(),
+      code: config.tipoEventoNovoPedido,
+      fullCode: config.tipoEventoNovoPedido,
+      orderId: idExterno,
+      merchantId: lojaIdExterno,
+      createdAt: agora.toISOString(),
+    }
+  : pedido99
+  ? montarEventoNovoPedido99Food(pedido99)
+  : { tipo: config.tipoEventoNovoPedido, pedidoId: idExterno, lojaId: lojaIdExterno, criadoEm: agora.toISOString() };
+  
+  const pedido = await prisma.pedido.create({
     data: {
       ...dadosPedido,
       endereco,
@@ -239,12 +273,133 @@ async function criarPedido(corpo: any) {
           plataforma,
           tipo: config.tipoEventoNovoPedido,
           canal: config.canal,
-          payload: { tipo: config.tipoEventoNovoPedido, pedidoId: idExterno, lojaId: lojaIdExterno, criadoEm: agora.toISOString() },
+          payload: payloadEvento as Prisma.InputJsonValue,
         },
       },
     },
     include: { eventos: true },
   });
+
+  if (pedidoRappi) void notificarWebhookRappi(pedido.eventos[0]!.id, pedidoRappi);
+  if (pedidoIFood) {
+    void fetch(process.env["IFOOD_WEBHOOK_URL"] ?? "http://localhost:3005/api/webhooks/ifood", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([payloadEvento]),
+    })
+      .then((res) => {
+        if (!res.ok) console.error(`[ifood] Webhook retornou status HTTP ${res.status}`);
+      })
+      .catch((erro) => console.error("[ifood] Erro ao disparar webhook automático:", erro));
+  }
+
+  if (pedidoUber) {
+    const urlDestino = process.env["UBER_WEBHOOK_URL"] ?? "http://localhost:3005/api/webhooks/ubereats";
+    void notificarWebhookUber(pedido.eventos[0]!.id, idExterno, lojaIdExterno, urlDestino);
+  }
+
+  if (pedido99) void notificarWebhook99Food(pedido.eventos[0]!.id, pedido99);
+  
+  return pedido;
+
+}
+
+async function notificarWebhookRappi(eventoId: string, pedidoRappi: Parameters<typeof dispararWebhookRappi>[0][number]) {
+  const resultado = await dispararWebhookRappi([pedidoRappi]);
+  if (!resultado.ok) console.warn(`[rappi] Webhook falhou (${resultado.statusHttp ?? resultado.erro})`);
+  await prisma.evento
+    .update({
+      where: { id: eventoId },
+      data: { tentativas: { increment: 1 }, ultimoStatusHttp: resultado.statusHttp, ...(resultado.ok ? { ackEm: new Date() } : {}) },
+    })
+    .catch((erro) => console.error("[rappi] Erro ao registrar tentativa do webhook:", erro));
+}
+
+export async function notificarWebhookUber(eventoId: string, pedidoIdExterno: string, lojaIdExterno: string, webhookUrl: string): Promise<void> {
+  try {
+    const response = await dispararWebhookUber(eventoId, pedidoIdExterno, webhookUrl, UBER_CLIENT_SECRET);
+
+    if (response.ok) {
+      await prisma.evento.update({
+        where: { id: eventoId },
+        data: { ackEm: new Date() }
+      });
+
+      const timer = setTimeout(async () => {
+        await verificarTimeoutUber(pedidoIdExterno, lojaIdExterno, webhookUrl);
+      }, 690 * 1000);
+
+      uberTimers.set(pedidoIdExterno, timer);
+    }
+  } catch (error) {
+    console.error(`[UBER_EATS] Erro ao processar webhook orders.notification (Evento: ${eventoId}):`, error);
+  }
+}
+
+async function verificarTimeoutUber(pedidoIdExterno: string, lojaIdExterno: string, webhookUrl: string): Promise<void> {
+  try {
+    const pedido = await prisma.pedido.findUnique({
+      where: {
+        plataforma_idExterno: {
+          plataforma: "UBER_EATS",
+          idExterno: pedidoIdExterno
+        }
+      }
+    });
+
+    if (pedido && pedido.status === "CREATED") {
+      const pedidoAtualizado = await prisma.pedido.update({
+        where: { id: pedido.id },
+        data: {
+          status: "FAILED",
+          eventos: {
+            create: {
+              plataforma: "UBER_EATS",
+              tipo: "orders.failure",
+              canal: "WEBHOOK",
+              payload: {
+                tipo: "orders.failure",
+                pedidoId: pedidoIdExterno,
+                status: "FAILED",
+                criadoEm: new Date().toISOString()
+              }
+            }
+          }
+        },
+        include: {
+          eventos: {
+            orderBy: { criadoEm: "desc" },
+            take: 1
+          }
+        }
+      });
+
+      const eventoFalhaId = pedidoAtualizado.eventos[0]!.id;
+      
+      const response = await dispararWebhookFalhaUber(eventoFalhaId, pedidoIdExterno, lojaIdExterno, webhookUrl, UBER_CLIENT_SECRET);
+      
+      if (response.ok) {
+        await prisma.evento.update({
+          where: { id: eventoFalhaId },
+          data: { ackEm: new Date() }
+        });
+      }
+    }
+  } catch (error) {
+    console.error(`[UBER_EATS] Erro ao verificar timeout do pedido ${pedidoIdExterno}:`, error);
+  }
+}
+
+/** Dispara o webhook do 99Food em segundo plano e registra a tentativa no evento. */
+async function notificarWebhook99Food(eventoId: string, pedido99: Parameters<typeof dispararWebhook99Food>[0]) {
+  const resultado = await dispararWebhook99Food(pedido99);
+  if (!resultado.ok) console.warn(`[99food] Webhook falhou (${resultado.statusHttp ?? resultado.erro})`);
+  await prisma.evento
+    .update({
+      where: { id: eventoId },
+      data: { tentativas: { increment: 1 }, ultimoStatusHttp: resultado.statusHttp, ...(resultado.ok ? { ackEm: new Date() } : {}) },
+    })
+    .catch((erro) => console.error("[99food] Erro ao registrar tentativa do webhook:", erro));
 }
 
 async function listarPedidos(params: URLSearchParams) {
@@ -267,7 +422,6 @@ async function buscarPedido(id: string) {
   return pedido;
 }
 
-/** PATCH /pedidos/:id/status  { status, tipoEvento? } — altera o status e registra um evento */
 async function atualizarStatus(id: string, corpo: any) {
   if (!corpo.status || typeof corpo.status !== "string") throw new ErroHttp(400, '"status" é obrigatório');
   const pedido = await buscarPedido(id);
@@ -295,7 +449,6 @@ async function removerPedido(id: string) {
   await prisma.pedido.delete({ where: { id } });
 }
 
-/** GET /eventos?plataforma=&canal=&pendentes=true */
 async function listarEventos(params: URLSearchParams) {
   const where: Prisma.EventoWhereInput = {};
   const plataforma = params.get("plataforma");
@@ -329,6 +482,14 @@ async function rotear(req: IncomingMessage, res: ServerResponse) {
   const metodo = req.method ?? "GET";
   let m: RegExpMatchArray | null;
 
+  if (metodo === "POST" && pathname === "/oauth/v2/token") {
+    return enviarJson(res, 200, {
+      access_token: randomUUID(),
+      token_type: "Bearer",
+      expires_in: 2592000
+    });
+  }
+
   if (metodo === "GET" && pathname === "/health") {
     await prisma.$queryRaw`SELECT 1`;
     return enviarJson(res, 200, { ok: true });
@@ -337,6 +498,55 @@ async function rotear(req: IncomingMessage, res: ServerResponse) {
     return enviarJson(res, 200, Object.keys(PLATAFORMAS));
   }
 
+  // ---------------------------------------------------------------------------
+  // Endpoints da API iFood Merchant v1.0 (Polling)
+  // ---------------------------------------------------------------------------
+  if (pathname === "/v1.0/events:poll" && metodo === "GET") {
+    const eventosPendentes = await prisma.evento.findMany({
+      where: { plataforma: "IFOOD", canal: "POLLING", ackEm: null },
+      orderBy: { criadoEm: "asc" },
+      take: 50,
+    });
+
+    if (eventosPendentes.length === 0) {
+      return enviarJson(res, 200, []);
+    }
+
+    const eventosIFood = eventosPendentes.map((e) => e.payload);
+    return enviarJson(res, 200, eventosIFood);
+  }
+
+  if (pathname === "/v1.0/events/acknowledgment" && metodo === "POST") {
+    const ackList = await lerCorpo(req);
+    if (Array.isArray(ackList)) {
+      for (const item of ackList) {
+        const orderId = item.orderId;
+        const id = item.id;
+        if (id || orderId) {
+          await prisma.evento.updateMany({
+            where: {
+              plataforma: "IFOOD",
+              ackEm: null,
+            },
+            data: { ackEm: new Date() },
+          });
+        }
+      }
+    }
+    return enviarJson(res, 202);
+  }
+
+  if ((m = pathname.match(new RegExp(`^/v1.0/orders/${UUID}$`))) && metodo === "GET") {
+    const pedido = await prisma.pedido.findFirst({
+      where: { idExterno: m[1], plataforma: "IFOOD" },
+    });
+    if (!pedido) throw new ErroHttp(404, "Pedido iFood não encontrado");
+    return enviarJson(res, 200, pedido.payload);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Endpoints genéricos do Mock
+  // ---------------------------------------------------------------------------
   if (pathname === "/pedidos") {
     if (metodo === "GET") return enviarJson(res, 200, await listarPedidos(searchParams));
     if (metodo === "POST") return enviarJson(res, 201, await criarPedido(await lerCorpo(req)));
@@ -357,6 +567,97 @@ async function rotear(req: IncomingMessage, res: ServerResponse) {
   }
   if ((m = pathname.match(new RegExp(`^/eventos/${UUID}/ack$`))) && metodo === "POST") {
     return enviarJson(res, 200, await confirmarEvento(m[1]!));
+  }
+
+  if ((m = pathname.match(new RegExp(`^/v2/eats/order/${UUID}$`))) && metodo === "GET") {
+    const pedido = await prisma.pedido.findFirst({
+      where: { 
+        idExterno: m[1], 
+        plataforma: "UBER_EATS" 
+      }
+    });
+
+    if (!pedido) throw new ErroHttp(404, "Pedido não encontrado");
+    
+    return enviarJson(res, 200, pedido.payload);
+  }
+
+  if ((m = pathname.match(new RegExp(`^/v1/eats/orders/${UUID}/accept_pos_order$`))) && metodo === "POST") {
+    const pedidoIdExterno = m[1]!;
+
+    if (uberTimers.has(pedidoIdExterno)) {
+      clearTimeout(uberTimers.get(pedidoIdExterno));
+      uberTimers.delete(pedidoIdExterno);
+    }
+
+    const pedido = await prisma.pedido.findFirst({
+      where: { idExterno: pedidoIdExterno, plataforma: "UBER_EATS" }
+    });
+
+    if (!pedido) throw new ErroHttp(404, "Pedido não encontrado");
+
+    await prisma.pedido.update({
+      where: { id: pedido.id },
+      data: {
+        status: "ACCEPTED",
+        eventos: {
+          create: {
+            plataforma: "UBER_EATS",
+            tipo: "ACCEPTED",
+            canal: "WEBHOOK",
+            payload: { 
+              tipo: "ACCEPTED", 
+              pedidoId: pedidoIdExterno, 
+              status: "ACCEPTED", 
+              criadoEm: new Date().toISOString() 
+            }
+          }
+        }
+      }
+    });
+
+    res.writeHead(204);
+    return res.end();
+  }
+
+  if ((m = pathname.match(new RegExp(`^/v1/eats/orders/${UUID}/deny_pos_order$`))) && metodo === "POST") {
+    const pedidoIdExterno = m[1]!;
+    const corpo = await lerCorpo(req);
+
+    if (uberTimers.has(pedidoIdExterno)) {
+      clearTimeout(uberTimers.get(pedidoIdExterno));
+      uberTimers.delete(pedidoIdExterno);
+    }
+
+    const pedido = await prisma.pedido.findFirst({
+      where: { idExterno: pedidoIdExterno, plataforma: "UBER_EATS" }
+    });
+
+    if (!pedido) throw new ErroHttp(404, "Pedido não encontrado");
+
+    await prisma.pedido.update({
+      where: { id: pedido.id },
+      data: {
+        status: "DENIED",
+        eventos: {
+          create: {
+            plataforma: "UBER_EATS",
+            tipo: "DENIED",
+            canal: "WEBHOOK",
+            payload: {
+              tipo: "DENIED",
+              pedidoId: pedidoIdExterno,
+              status: "DENIED",
+              deny_reason: corpo.deny_reason,
+              criadoEm: new Date().toISOString()
+            }
+          }
+        }
+      }
+    });
+
+    res.writeHead(204);
+    return res.end();
   }
 
   throw new ErroHttp(404, `Rota não encontrada: ${metodo} ${pathname}`);

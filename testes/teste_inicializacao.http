@@ -1,0 +1,115 @@
+### ==========================================
+### SCRIPT UNIFICADO: DADOS INÉDITOS (BASEADO NAS ROTAS ATUAIS)
+### ==========================================
+
+### Variáveis Globais (Ajuste as portas se necessário)
+@urlClientes = http://localhost:3001/api
+@urlPedidos = http://localhost:3002/api
+@urlRestaurantes = http://localhost:3003/api
+@urlProdutos = http://localhost:3004
+
+### ==========================================
+### 1. RESTAURANTES (api-restaurantes)
+### ==========================================
+
+### 1.1 Criar Restaurante
+# Utiliza a rota POST /restaurantes[cite: 17].
+POST {{urlRestaurantes}}/restaurantes
+Content-Type: application/json
+
+{
+  "cnpj": "98765432000199",
+  "nome": "Pizzaria Forno a Lenha",
+  "email": "contato@fornoalenha.com.br",
+  "telefone": "11966667777",
+  "cep": "12230000",
+  "cidade": "São José dos Campos",
+  "endereco": "Rua das Laranjeiras, 850, Jardim Aquarius"
+}
+
+
+### ==========================================
+### 2. PRODUTOS E MAPEAMENTO (api-produtos)
+### ==========================================
+
+### 2.1 Criar Produto
+# Utiliza a rota POST /produtos vinculando ao Restaurante recém-criado (Assumindo ID 3)[cite: 16].
+# Caso o ID do seu novo restaurante seja diferente, altere o "restauranteId" abaixo.
+POST {{urlProdutos}}/produtos
+Content-Type: application/json
+
+{
+  "nome": "Pizza Margherita",
+  "preco": 55.00,
+  "restauranteId": 3
+}
+
+### 2.2 Criar Mapeamento do App
+# Utiliza a rota POST /mapeamentos para vincular o Produto ao Uber Eats[cite: 16].
+# Assumindo que o ID do produto criado acima foi 3.
+POST {{urlProdutos}}/mapeamentos
+Content-Type: application/json
+
+{
+  "produtoId": 3,
+  "plataforma": "ubereats",
+  "idExternoApp": "UBER-MARGHERITA-1"
+}
+
+
+### ==========================================
+### 3. CLIENTES (api-clientes)
+### ==========================================
+
+### 3.1 Criar Cliente
+# Utiliza a rota POST /clientes com dados inéditos[cite: 13].
+POST {{urlClientes}}/clientes
+Content-Type: application/json
+
+{
+  "nomeCliente": "Marina Silva Costa",
+  "endereco": "Av. Cassiano Ricardo, 120, Apto 55",
+  "telefone": "11944445555",
+  "email": "marina.costa@email.com",
+  "cpf": "33344455566"
+}
+
+
+### ==========================================
+### 4. PEDIDOS E ITENS (api-pedidos)
+### ==========================================
+
+### 4.1 Criar Pedido (com Itens Embutidos)
+# Utiliza a rota POST /pedidos. 
+# Esta rota cria o Pedido e insere automaticamente na tabela ItemPedido os dados enviados no array "itens"[cite: 15].
+# Assumindo que o Cliente ID é 3 e o Produto ID é 3.
+POST {{urlPedidos}}/pedidos
+Content-Type: application/json
+
+{
+  "nomeCliente": "Marina Silva Costa",
+  "clienteId": 2,
+  "preco": 55.00,
+  "metodoPagamento": "PIX",
+  "app": "ubereats",
+  "enderecoDestino": "Av. Cassiano Ricardo, 120, Apto 55",
+  "cepDestino": "12240000",
+  "latitude": -23.2185,
+  "longitude": -45.9012,
+  "itens": [
+    {
+      "produtoId": 3,
+      "quantidade": 1
+    }
+  ]
+}
+
+### 4.2 Atualizar Status do Pedido
+# Utiliza a rota PATCH /pedidos/:id/status para mudar o pedido para entregue[cite: 15].
+# Assumindo que o ID do pedido gerado acima foi 3.
+PATCH {{urlPedidos}}/pedidos/4/status
+Content-Type: application/json
+
+{
+  "status": "entregue"
+}

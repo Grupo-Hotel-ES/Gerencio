@@ -158,4 +158,109 @@ routes.delete('/produtos/:id', async (req, res) => {
   res.status(204).send()
 })
 
+// --- MAPEAMENTO APP ---
+
+// 1. Criar novo mapeamento de produto para plataforma externa
+routes.post('/mapeamentos', async (req, res) => {
+  try {
+    const { produtoId, plataforma, idExternoApp } = req.body
+
+    const parsedProdutoId = parseId(produtoId)
+
+    if (!plataforma || !idExternoApp || parsedProdutoId === null) {
+      res.status(400).json({ error: 'produtoId, plataforma e idExternoApp válidos são obrigatórios.' })
+      return
+    }
+
+    const produtoExistente = await db.produto.findUnique({
+      where: { id: parsedProdutoId },
+    })
+
+    if (!produtoExistente) {
+      res.status(404).json({ error: 'Produto informado não existe.' })
+      return
+    }
+
+    const mapeamento = await db.mapeamentoApp.create({
+      data: {
+        plataforma,
+        idExternoApp,
+        produto: {
+          connect: { id: parsedProdutoId },
+        },
+      },
+    })
+
+    res.status(201).json(mapeamento)
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Erro ao criar mapeamento', detalhe: (error as Error).message })
+  }
+})
+
+// 2. Listar todos os mapeamentos cadastrados
+routes.get('/mapeamentos', async (req, res) => {
+  try {
+    const mapeamentos = await db.mapeamentoApp.findMany({
+      include: { produto: true },
+    })
+    res.json(mapeamentos)
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Erro ao listar mapeamentos', detalhe: (error as Error).message })
+  }
+})
+
+// 3. Buscar produto pela plataforma e idExternoApp (Usado na tradução de Webhooks)
+routes.get('/mapeamentos/buscar', async (req, res) => {
+  try {
+    const { plataforma, idExternoApp } = req.query
+
+    if (!plataforma || !idExternoApp) {
+      res.status(400).json({ error: 'Parâmetros plataforma e idExternoApp são obrigatórios na query.' })
+      return
+    }
+
+    const mapeamento = await db.mapeamentoApp.findFirst({
+      where: {
+        plataforma: String(plataforma),
+        idExternoApp: String(idExternoApp),
+      },
+      include: { produto: true },
+    })
+
+    if (!mapeamento) {
+      res.status(404).json({ error: 'Mapeamento não encontrado para esta plataforma e ID externo.' })
+      return
+    }
+
+    res.json(mapeamento)
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Erro ao buscar mapeamento', detalhe: (error as Error).message })
+  }
+})
+
+// 4. Remover um mapeamento por ID
+routes.delete('/mapeamentos/:id', async (req, res) => {
+  try {
+    const id = parseId(req.params.id)
+    if (id === null) {
+      res.status(400).json({ error: 'Id inválido' })
+      return
+    }
+
+    const mapeamentoExistente = await db.mapeamentoApp.findUnique({ where: { id } })
+    if (!mapeamentoExistente) {
+      res.status(404).json({ error: 'Mapeamento não encontrado' })
+      return
+    }
+
+    await db.mapeamentoApp.delete({ where: { id } })
+    res.status(204).send()
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Erro ao deletar mapeamento', detalhe: (error as Error).message })
+  }
+})
 export default routes

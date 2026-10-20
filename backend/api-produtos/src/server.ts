@@ -25,7 +25,7 @@ app.get('/health', (req, res) => {
 })
 
 // Rotas da API
-app.use('/api', routes)
+app.use(routes)
 
 // Rota não encontrada
 app.use((req, res) => {
