@@ -21,6 +21,7 @@ const ICONES = {
   estoque: { ios: 'shippingbox', android: 'inventory_2', web: 'inventory_2' },
   relatorios: { ios: 'chart.bar', android: 'bar_chart', web: 'bar_chart' },
   rotas: { ios: 'arrow.triangle.swap', android: 'route', web: 'route' },
+  configuracoes: { ios: 'gearshape', android: 'settings', web: 'settings' },
   camadas: { ios: 'square.stack.3d.up', android: 'layers', web: 'layers' },
   ajuda: { ios: 'questionmark.circle', android: 'help', web: 'help' },
   sino: { ios: 'bell', android: 'notifications', web: 'notifications' },
