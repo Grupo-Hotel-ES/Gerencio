@@ -101,10 +101,10 @@ export function Sidebar() {
 
         <View style={styles.usuario}>
           <Texto tamanho={16} peso={500}>
-            Vila Bistrô
+            Gerôncio
           </Texto>
           <Texto tamanho={13} cor="textoSecundario">
-            Marina • Administradora
+            Painel local
           </Texto>
         </View>
       </View>

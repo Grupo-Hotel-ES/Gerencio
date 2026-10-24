@@ -1,384 +1,171 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { StyleSheet, TextInput, View } from 'react-native';
 
+import { FormularioProduto } from '@/components/dashboard/novo-produto';
+import { Campo, SeletorRestaurante } from '@/components/dashboard/formularios';
 import { CartaoResumo, Grade, Pagina, useLarguraConteudo } from '@/components/dashboard/pagina';
-import { Aviso, Botao, Cartao, Chip, Divisor, Etiqueta, Icone, Texto } from '@/components/dashboard/ui';
-import { Fonts } from '@/constants/theme';
+import { Aviso, Botao, Cartao, Chip, Divisor, Etiqueta, Texto } from '@/components/dashboard/ui';
 import { Espacamento, Raio } from '@/constants/tokens';
-import {
-  CANAIS_CONECTADOS,
-  ESTOQUE_DEMO,
-  ULTIMA_SINCRONIZACAO_DEMO,
-  type ProdutoEstoque,
-} from '@/data/estoque';
-import { formatarHora } from '@/data/pedidos';
+import { formatarHora, formatarReais } from '@/data/pedidos';
 import { useCores } from '@/hooks/use-cores';
+import { listarProdutos, listarRestaurantes, salvarEstoque, type Produto, type Restaurante } from '@/services/api-produtos';
 
 type Filtro = 'todos' | 'disponiveis' | 'esgotados';
-
+type Rascunho = { valor: string; versaoEstoque: number };
 const FILTROS: { id: Filtro; rotulo: string }[] = [
-  { id: 'todos', rotulo: 'Todos' },
-  { id: 'disponiveis', rotulo: 'Disponíveis' },
-  { id: 'esgotados', rotulo: 'Esgotados' },
+  { id: 'todos', rotulo: 'Todos' }, { id: 'disponiveis', rotulo: 'Disponíveis' }, { id: 'esgotados', rotulo: 'Esgotados' },
 ];
-
-function plural(quantidade: number, singular: string, pluralizado: string) {
-  return `${quantidade} ${quantidade === 1 ? singular : pluralizado}`;
-}
 
 export default function GestaoDeEstoque() {
   const cores = useCores();
-  const larguraConteudo = useLarguraConteudo();
-  const [produtos, setProdutos] = useState<ProdutoEstoque[]>(ESTOQUE_DEMO);
-  const [sincronizadoAs, setSincronizadoAs] = useState(ULTIMA_SINCRONIZACAO_DEMO);
+  const largura = useLarguraConteudo();
+  const [produtos, setProdutos] = useState<Produto[] | null>(null);
+  const [restaurantes, setRestaurantes] = useState<Restaurante[]>([]);
+  const [restauranteId, setRestauranteId] = useState<number>();
+  const [rascunhos, setRascunhos] = useState<Record<number, Rascunho>>({});
   const [filtro, setFiltro] = useState<Filtro>('todos');
-  const [buscando, setBuscando] = useState(false);
   const [busca, setBusca] = useState('');
+  const [novoProduto, setNovoProduto] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [erroRestaurantes, setErroRestaurantes] = useState<string | null>(null);
+  const [salvando, setSalvando] = useState(false);
+  const [atualizadoEm, setAtualizadoEm] = useState<Date | null>(null);
+  const consulta = useRef(0);
+  const enviando = useRef(false);
 
-  const disponiveis = produtos.filter((p) => p.quantidade > 0).length;
-  const esgotados = produtos.length - disponiveis;
-  const pendentes = produtos.filter((p) => p.quantidade !== p.publicado).length;
-  const contagem: Record<Filtro, number> = { todos: produtos.length, disponiveis, esgotados };
+  useEffect(() => {
+    let ativo = true;
+    const atualizar = () => listarRestaurantes().then((dados) => {
+      if (ativo) { setRestaurantes(dados); setErroRestaurantes(null); }
+    }).catch((e: Error) => { if (ativo) setErroRestaurantes(e.message); });
+    atualizar();
+    const intervalo = setInterval(atualizar, 10_000);
+    return () => { ativo = false; clearInterval(intervalo); };
+  }, []);
 
-  const termo = busca.trim().toLowerCase();
-  const visiveis = produtos.filter(
-    (p) =>
-      (filtro === 'todos' || (filtro === 'disponiveis') === p.quantidade > 0) &&
-      (!termo || p.nome.toLowerCase().includes(termo)),
-  );
+  const carregar = useCallback(async () => {
+    const versao = ++consulta.current;
+    try {
+      const dados = await listarProdutos(restauranteId);
+      if (versao !== consulta.current) return;
+      setProdutos(dados); setAtualizadoEm(new Date()); setErro(null);
+    } catch (e) { if (versao === consulta.current) setErro((e as Error).message); }
+  }, [restauranteId]);
 
-  const ajustar = (id: number, delta: number) =>
-    setProdutos((atuais) =>
-      atuais.map((p) => (p.id === id ? { ...p, quantidade: Math.max(0, p.quantidade + delta) } : p)),
-    );
+  const pendentes = Object.keys(rascunhos).length;
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carregar atualiza o estado somente após a resposta HTTP.
+    carregar();
+    return () => { consulta.current += 1; };
+  }, [carregar]);
 
-  const salvar = () => {
-    setProdutos((atuais) => atuais.map((p) => ({ ...p, publicado: p.quantidade })));
-    setSincronizadoAs(formatarHora(new Date()));
+  // Durante a edição, a versão original acompanha o rascunho até o servidor confirmar o ajuste.
+  useEffect(() => {
+    if (pendentes || salvando) return;
+    const intervalo = setInterval(carregar, 10_000);
+    return () => clearInterval(intervalo);
+  }, [carregar, pendentes, salvando]);
+
+  const editar = (produto: Produto, valor: string) => {
+    setRascunhos((atuais) => {
+      const novos = { ...atuais };
+      if (valor.trim() !== '' && Number(valor) === produto.quantidade) delete novos[produto.id];
+      else novos[produto.id] = { valor, versaoEstoque: atuais[produto.id]?.versaoEstoque ?? produto.versaoEstoque };
+      return novos;
+    });
   };
 
-  const emColunas = larguraConteudo >= 1000;
-  const compacto = larguraConteudo < 640;
-  const controle = [styles.controle, { borderColor: cores.borda, backgroundColor: cores.superficie }];
+  const salvar = async () => {
+    if (enviando.current) return;
+    const ajustes = Object.entries(rascunhos).map(([id, r]) => ({ produtoId: Number(id), quantidade: Number(r.valor), versaoEstoque: r.versaoEstoque }));
+    if (Object.values(rascunhos).some((r) => !r.valor.trim()) || ajustes.some((a) => !Number.isInteger(a.quantidade) || a.quantidade < 0 || a.quantidade > 1_000_000)) {
+      setErro('Use quantidades inteiras entre zero e 1.000.000.'); return;
+    }
+    enviando.current = true; setSalvando(true); setErro(null); consulta.current += 1;
+    try {
+      const salvos = await salvarEstoque(ajustes);
+      setProdutos((atuais) => (atuais ?? []).map((p) => salvos.find((s) => s.id === p.id) ?? p));
+      setRascunhos({}); setAtualizadoEm(new Date());
+    } catch (e) { setErro((e as Error).message); }
+    finally { enviando.current = false; setSalvando(false); }
+  };
+
+  const lista = produtos ?? [];
+  const disponiveis = lista.filter((p) => p.quantidade > 0).length;
+  const contagem = { todos: lista.length, disponiveis, esgotados: lista.length - disponiveis };
+  const visiveis = lista.filter((p) =>
+    (filtro === 'todos' || (filtro === 'disponiveis' ? p.quantidade > 0 : p.quantidade === 0)) &&
+    p.nome.toLowerCase().includes(busca.trim().toLowerCase()));
 
   return (
-    <Pagina
-      titulo="Gestão de estoque"
-      subtitulo="Defina o que está disponível hoje e mantenha os canais alinhados."
-      acao={<Botao rotulo="Cadastrar produto" icone="mais" variante="primario" />}>
-      <Grade colunas={emColunas ? 3 : 1}>
-        <CartaoResumo
-          rotulo="Produtos cadastrados"
-          valor={produtos.length}
-          detalhe="Catálogo de hoje • 11 out."
-        />
-        <CartaoResumo
-          rotulo="Disponíveis"
-          valor={disponiveis}
-          detalhe={
-            esgotados === 0
-              ? 'Nenhum produto esgotado'
-              : plural(esgotados, 'produto esgotado', 'produtos esgotados')
-          }
-        />
-        <CartaoResumo
-          rotulo="Alterações pendentes"
-          valor={pendentes}
-          detalhe={pendentes === 0 ? 'Canais com o estoque atual' : 'Ainda não enviadas aos canais'}
-        />
+    <Pagina titulo="Gestão de estoque" subtitulo="Consulte o saldo real e ajuste as unidades disponíveis para venda."
+      acao={<Botao rotulo="Cadastrar produto" icone="mais" variante="primario" disabled={!restaurantes.length || salvando || pendentes > 0} onPress={() => setNovoProduto(true)} />}>
+      <SeletorRestaurante restaurantes={restaurantes} valor={restauranteId} onChange={(id) => {
+        consulta.current += 1; setProdutos(null); setAtualizadoEm(null); setRestauranteId(id);
+      }} todos desabilitado={pendentes > 0 || salvando || novoProduto} />
+      {erroRestaurantes && <Texto cor="feedbackErro" accessibilityRole="alert">Restaurantes: {erroRestaurantes}</Texto>}
+      {!erroRestaurantes && restaurantes.length === 0 && <Texto cor="textoSecundario">É necessário cadastrar um restaurante antes de criar produtos.</Texto>}
+      {novoProduto && <FormularioProduto restaurantes={restaurantes} restauranteInicial={restauranteId}
+        onFechar={() => setNovoProduto(false)} onConcluir={(id) => {
+          setNovoProduto(false); setFiltro('todos'); setBusca('');
+          if (restauranteId !== undefined && restauranteId !== id) {
+            consulta.current += 1; setProdutos(null); setAtualizadoEm(null); setRestauranteId(id);
+          } else carregar();
+        }} />}
+      <Grade colunas={largura >= 900 ? 3 : 1}>
+        <CartaoResumo rotulo="Produtos cadastrados" valor={produtos ? lista.length : '—'} detalhe="Catálogo salvo no Gerôncio" />
+        <CartaoResumo rotulo="Disponíveis" valor={produtos ? disponiveis : '—'} detalhe={contagem.esgotados + ' produtos com saldo zero'} />
+        <CartaoResumo rotulo="Ajustes pendentes" valor={pendentes} detalhe="Alterações ainda não salvas" />
       </Grade>
-
-      {pendentes > 0 && (
-        <Aviso
-          icone="salvar"
-          titulo={`${plural(pendentes, 'alteração', 'alterações')} ainda não ${pendentes === 1 ? 'salva' : 'salvas'}`}
-          texto="As plataformas mantêm o último estoque publicado. Salve para aplicar as novas quantidades nos seis canais."
-        />
-      )}
-
-      <View style={[styles.colunas, !emColunas && styles.empilhado]}>
-        <Cartao style={styles.tabela}>
-          <View style={styles.linhaTitulo}>
-            <Texto accessibilityRole="header" tamanho={18} peso={500}>
-              Estoque disponível no dia
-            </Texto>
-            {buscando ? (
-              <View style={controle}>
-                <Icone nome="busca" />
-                <TextInput
-                  autoFocus
-                  value={busca}
-                  onChangeText={setBusca}
-                  onBlur={() => !busca && setBuscando(false)}
-                  placeholder="Nome do produto"
-                  placeholderTextColor={cores.textoSecundario}
-                  accessibilityLabel="Buscar produto"
-                  style={[styles.campoBusca, { color: cores.textoPrincipal }]}
-                />
+      {pendentes > 0 && <Aviso icone="salvar" titulo="Há ajustes para salvar" texto="Os pedidos usam o último saldo salvo. Salve seus ajustes antes de trocar de página ou restaurante." />}
+      {erro && <Cartao><Texto cor="feedbackErro" accessibilityRole="alert">{erro}</Texto></Cartao>}
+      <Cartao style={styles.bloco}>
+        <View style={styles.linha}>
+          <Texto tamanho={18} peso={500}>Saldo por produto</Texto>
+          <Texto cor="textoSecundario">{atualizadoEm ? 'Atualizado às ' + formatarHora(atualizadoEm) : 'Aguardando dados'}</Texto>
+          <Botao rotulo={pendentes ? 'Descartar ajustes e recarregar' : 'Atualizar'} icone="sincronizar" disabled={salvando}
+            onPress={() => { setRascunhos({}); carregar(); }} />
+        </View>
+        <Campo rotulo="Buscar produto" value={busca} onChangeText={setBusca} placeholder="Nome do produto" />
+        <View style={styles.linha}>
+          {FILTROS.map(({ id, rotulo }) => <Chip key={id} rotulo={rotulo + ' · ' + contagem[id]} ativo={filtro === id} onPress={() => setFiltro(id)} />)}
+        </View>
+        {visiveis.map((p) => {
+          const rascunho = rascunhos[p.id];
+          const valor = rascunho?.valor ?? String(p.quantidade);
+          return <View key={p.id} style={styles.bloco}>
+            <View style={styles.linha}>
+              <View style={styles.produto}>
+                <Texto tamanho={16} peso={600}>{p.nome}</Texto>
+                <Texto cor="textoSecundario">{p.categoria} • {formatarReais(p.preco)}</Texto>
+                <Texto cor="textoSecundario">{p.restaurante?.nome}</Texto>
+                <Texto cor="textoSecundario">Salvo: {p.quantidade} un.{rascunho ? ' • Ajuste pendente' : ''}</Texto>
               </View>
-            ) : (
-              <Botao rotulo="Buscar produto" icone="busca" onPress={() => setBuscando(true)} />
-            )}
-          </View>
-
-          <View style={styles.filtros}>
-            {FILTROS.map(({ id, rotulo }) => (
-              <Chip
-                key={id}
-                rotulo={`${rotulo} · ${contagem[id]}`}
-                ativo={filtro === id}
-                onPress={() => setFiltro(id)}
-              />
-            ))}
-          </View>
-
-          <View>
-            <View style={[styles.linha, styles.cabecalhoTabela, { backgroundColor: cores.fundo }]}>
-              <Texto peso={500} style={styles.colunaProduto}>
-                Produto
-              </Texto>
-              {!compacto && (
-                <Texto peso={500} style={styles.colunaPublicado}>
-                  Publicado
-                </Texto>
-              )}
-              <Texto peso={500} style={styles.colunaQuantidade}>
-                Quantidade
-              </Texto>
-              <Texto peso={500} style={styles.colunaDisponibilidade}>
-                Disponibilidade
-              </Texto>
-            </View>
-
-            {visiveis.map((produto) => {
-              const disponivel = produto.quantidade > 0;
-              const pendente = produto.quantidade !== produto.publicado;
-              return (
-                <View key={produto.id}>
-                  <View style={styles.linha}>
-                    <View style={[styles.colunaProduto, styles.produto]}>
-                      <Texto tamanho={16} peso={500}>
-                        {produto.nome}
-                      </Texto>
-                      <Texto tamanho={13} cor="textoSecundario">
-                        {produto.categoria}
-                        {pendente && ' • Alteração pendente'}
-                      </Texto>
-                    </View>
-                    {!compacto && (
-                      <Texto tamanho={16} style={styles.colunaPublicado}>
-                        {produto.publicado} un.
-                      </Texto>
-                    )}
-                    <View style={styles.colunaQuantidade}>
-                      <View style={[styles.seletor, { borderColor: cores.borda }]}>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`Diminuir ${produto.nome}`}
-                          disabled={!disponivel}
-                          onPress={() => ajustar(produto.id, -1)}
-                          style={styles.passo}>
-                          <Icone nome="menos" tamanho={18} />
-                        </Pressable>
-                        <Texto tamanho={16} peso={600} style={styles.valor}>
-                          {produto.quantidade}
-                        </Texto>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`Aumentar ${produto.nome}`}
-                          onPress={() => ajustar(produto.id, 1)}
-                          style={styles.passo}>
-                          <Icone nome="mais" tamanho={18} />
-                        </Pressable>
-                      </View>
-                    </View>
-                    <View style={styles.colunaDisponibilidade}>
-                      <Etiqueta
-                        rotulo={disponivel ? 'Disponível' : 'Esgotado'}
-                        corPonto={disponivel ? cores.statusEntregue : cores.statusCancelado}
-                      />
-                    </View>
-                  </View>
-                  <Divisor />
-                </View>
-              );
-            })}
-
-            {visiveis.length === 0 && (
-              <Texto cor="textoSecundario" style={styles.vazio}>
-                Nenhum produto encontrado.
-              </Texto>
-            )}
-          </View>
-
-          <View style={styles.linhaTitulo}>
-            <Texto tamanho={13} cor="textoSecundario">
-              {pendentes === 0
-                ? 'Nenhuma alteração pendente'
-                : `${plural(pendentes, 'produto alterado', 'produtos alterados')} • revisão local`}
-            </Texto>
-            <Botao
-              rotulo="Salvar e sincronizar"
-              icone="sincronizar"
-              variante="primario"
-              disabled={pendentes === 0}
-              onPress={salvar}
-              style={pendentes === 0 && styles.desabilitado}
-            />
-          </View>
-        </Cartao>
-
-        <View style={[styles.lateral, !emColunas && styles.lateralEmpilhada]}>
-          <Cartao style={styles.bloco}>
-            <Texto accessibilityRole="header" tamanho={18} peso={500}>
-              Conexão com os canais
-            </Texto>
-            <Texto tamanho={13} cor="textoSecundario">
-              Último estoque salvo sincronizado às {sincronizadoAs}.
-            </Texto>
-            <View style={styles.canais}>
-              {CANAIS_CONECTADOS.map((canal) => (
-                <Etiqueta key={canal} rotulo={canal} corPonto={cores.statusEntregue} />
-              ))}
+              <View style={styles.linha}>
+                <Botao rotulo="−" accessibilityLabel={'Diminuir ' + p.nome} disabled={salvando || novoProduto || Number(valor) <= 0}
+                  onPress={() => editar(p, String(Math.max(0, (Number(valor) || 0) - 1)))} />
+                <TextInput accessibilityLabel={'Quantidade de ' + p.nome} keyboardType="number-pad" value={valor} editable={!salvando && !novoProduto}
+                  onChangeText={(texto) => editar(p, texto)} style={[styles.quantidade, { color: cores.textoPrincipal, borderColor: cores.borda }]} />
+                <Botao rotulo="+" accessibilityLabel={'Aumentar ' + p.nome} disabled={salvando || novoProduto || Number(valor) >= 1_000_000}
+                  onPress={() => editar(p, String((Number(valor) || 0) + 1))} />
+              </View>
+              <Etiqueta rotulo={p.quantidade > 0 ? 'Disponível' : 'Esgotado'} corPonto={p.quantidade > 0 ? cores.statusEntregue : cores.statusCancelado} />
             </View>
             <Divisor />
-            <Texto tamanho={13} cor="textoSecundario" style={styles.paragrafo}>
-              A baixa por pedido é automática. O saldo atualizado é enviado aos outros canais para
-              evitar overselling.
-            </Texto>
-          </Cartao>
-
-          <Cartao style={styles.bloco}>
-            <Icone nome="escudo" tamanho={28} />
-            <Texto accessibilityRole="header" tamanho={18} peso={500}>
-              Venda só o que tem
-            </Texto>
-            <Texto tamanho={16} cor="textoSecundario" style={styles.destaque}>
-              Quando o saldo chega a zero, o produto fica indisponível nos canais conectados.
-            </Texto>
-            <Texto tamanho={13} cor="textoSecundario" style={styles.paragrafo}>
-              As alterações manuais só valem depois de salvar e sincronizar.
-            </Texto>
-          </Cartao>
-        </View>
-      </View>
+          </View>;
+        })}
+        {visiveis.length === 0 && <Texto cor="textoSecundario">{produtos === null ? (erro ? 'Estoque indisponível.' : 'Carregando estoque…') : 'Nenhum produto encontrado.'}</Texto>}
+        <Botao rotulo={salvando ? 'Salvando…' : 'Salvar ajustes'} icone="salvar" variante="primario" disabled={!pendentes || salvando} onPress={salvar} />
+      </Cartao>
+      <Aviso icone="info" titulo="Estoque local do restaurante"
+        texto="Ao aceitar um pedido, as unidades são reservadas. Cancelamentos antes da saída devolvem essa reserva. O envio do saldo para os aplicativos de delivery ainda não está disponível." />
     </Pagina>
   );
 }
 
 const styles = StyleSheet.create({
-  colunas: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Espacamento.large,
-  },
-  empilhado: {
-    flexDirection: 'column',
-    alignItems: 'stretch',
-  },
-  tabela: {
-    flex: 1,
-    gap: Espacamento.large,
-  },
-  linhaTitulo: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Espacamento.medium,
-  },
-  controle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Espacamento.small,
-    height: 44,
-    paddingHorizontal: Espacamento.medium,
-    borderWidth: 1,
-    borderRadius: Raio.small,
-  },
-  campoBusca: {
-    width: 160,
-    fontFamily: Fonts?.sans,
-    fontSize: 14,
-    outlineWidth: 0,
-  },
-  filtros: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Espacamento.small,
-  },
-  linha: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Espacamento.medium,
-    minHeight: 72,
-  },
-  cabecalhoTabela: {
-    minHeight: 36,
-    paddingLeft: Espacamento.small,
-    borderRadius: Raio.small / 2,
-  },
-  colunaProduto: {
-    flex: 1,
-  },
-  colunaPublicado: {
-    width: 88,
-  },
-  colunaQuantidade: {
-    width: 100,
-  },
-  colunaDisponibilidade: {
-    width: 132,
-    alignItems: 'flex-start',
-  },
-  produto: {
-    gap: Espacamento.xsmall,
-  },
-  seletor: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    height: 36,
-    borderWidth: 1,
-    borderRadius: Raio.small,
-  },
-  passo: {
-    width: 32,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  valor: {
-    minWidth: 28,
-    textAlign: 'center',
-  },
-  vazio: {
-    paddingVertical: Espacamento.xlarge,
-    textAlign: 'center',
-  },
-  desabilitado: {
-    opacity: 0.5,
-  },
-  lateral: {
-    width: 300,
-    gap: Espacamento.large,
-  },
-  lateralEmpilhada: {
-    width: '100%',
-  },
-  bloco: {
-    gap: Espacamento.medium,
-  },
-  canais: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Espacamento.small,
-    marginVertical: Espacamento.xsmall,
-  },
-  paragrafo: {
-    lineHeight: 18,
-  },
-  destaque: {
-    lineHeight: 22,
-  },
+  bloco: { gap: Espacamento.large },
+  linha: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Espacamento.small },
+  produto: { flex: 1, minWidth: 180, gap: Espacamento.xsmall },
+  quantidade: { width: 80, minHeight: 44, borderWidth: 1, borderRadius: Raio.small, padding: Espacamento.small, fontSize: 16, textAlign: 'center' },
 });

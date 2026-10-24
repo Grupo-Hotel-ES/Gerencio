@@ -69,6 +69,7 @@ export default function Relatorios() {
 
   useEffect(() => {
     const agora = new Date();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- A data local só é conhecida após a hidratação.
     setHoje(new Date(agora.getFullYear(), agora.getMonth(), agora.getDate()));
   }, []);
 
@@ -86,6 +87,7 @@ export default function Relatorios() {
   useEffect(() => {
     if (inicioMs === undefined || fimMs === undefined) return;
     let ativo = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Limpa o resultado do período anterior enquanto busca outro.
     setRelatorio(null);
     setErro(false);
     buscarRelatorioVendas(new Date(inicioMs), new Date(fimMs))

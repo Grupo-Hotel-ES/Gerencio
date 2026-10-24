@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Etiqueta, Icone, Texto } from './ui';
+import { Icone, Texto } from './ui';
 
 import { Espacamento, Raio } from '@/constants/tokens';
 import { formatarHora } from '@/data/pedidos';
@@ -18,6 +18,7 @@ export function TopBar() {
   const [agora, setAgora] = useState<Date | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- O relógio só começa após a hidratação do HTML estático.
     setAgora(new Date());
     const intervalo = setInterval(() => setAgora(new Date()), 30_000);
     return () => clearInterval(intervalo);
@@ -26,9 +27,8 @@ export function TopBar() {
   return (
     <View style={[styles.container, { backgroundColor: cores.superficie }]}>
       <Texto tamanho={16} peso={500}>
-        Vila Bistrô
+        Gerôncio
       </Texto>
-      <Etiqueta rotulo="Loja aberta" corPonto={cores.statusEntregue} />
 
       <View style={styles.direita}>
         <Texto tamanho={13} cor="textoSecundario">
@@ -39,7 +39,7 @@ export function TopBar() {
         </Pressable>
         <View style={[styles.avatar, { backgroundColor: cores.brand }]}>
           <Texto peso={600} cor="textOnBrand">
-            MA
+            G
           </Texto>
         </View>
       </View>

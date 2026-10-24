@@ -1,11 +1,17 @@
 import { Router } from 'express'
-import { db, parseId, StatusPedido } from '@geroncio/shared-db'
+import { db, parseId, StatusPedido, ErroOperacao, prepararItensPedido, mudarStatusPedido } from '@geroncio/shared-db'
 
 const routes = Router()
+const incluirPedido = { itens: { include: { produto: true } }, entrega: { include: { entregador: true } }, restaurante: true } as const
 
 // 1. LISTAR PEDIDOS (opcionalmente filtrando por status: ?status=novo,em_preparo)
 routes.get('/pedidos', async (req, res) => {
   const filtro = typeof req.query.status === 'string' ? req.query.status.split(',') : []
+  const restauranteId = req.query.restauranteId === undefined ? undefined : parseId(String(req.query.restauranteId))
+  if (restauranteId === null) {
+    res.status(400).json({ error: 'restauranteId inválido' })
+    return
+  }
   const status = filtro.filter((s): s is StatusPedido =>
     Object.values(StatusPedido).includes(s as StatusPedido),
   )
@@ -18,11 +24,8 @@ routes.get('/pedidos', async (req, res) => {
 
   try {
     const pedidos = await db.pedido.findMany({
-      ...(status.length > 0 && { where: { status: { in: status } } }),
-      include: {
-        itens: { include: { produto: true } },
-        entrega: { include: { entregador: true } },
-      },
+      where: { ...(status.length > 0 && { status: { in: status } }), ...(restauranteId && { restauranteId }) },
+      include: incluirPedido,
       orderBy: { id: 'desc' },
     })
     res.json(pedidos)
@@ -42,10 +45,7 @@ routes.get('/pedidos/:id', async (req, res) => {
   try {
     const pedido = await db.pedido.findUnique({
       where: { id },
-      include: {
-        itens: { include: { produto: true } },
-        entrega: { include: { entregador: true } },
-      },
+      include: incluirPedido,
     })
     if (!pedido) {
       res.status(404).json({ error: 'Pedido não encontrado' })
@@ -72,10 +72,12 @@ routes.post('/pedidos', async (req, res) => {
     itens,
     entregadorId,
     custoEntrega,
+    restauranteId,
   } = req.body
 
-  if (preco === undefined || !metodoPagamento || !app || !enderecoDestino || !cepDestino) {
-    res.status(400).json({ error: 'Campos obrigatórios ausentes (preco, metodoPagamento, app, enderecoDestino, cepDestino)' })
+  if (typeof metodoPagamento !== 'string' || !metodoPagamento.trim() || typeof app !== 'string' || !app.trim() ||
+      typeof enderecoDestino !== 'string' || !enderecoDestino.trim() || typeof cepDestino !== 'string') {
+    res.status(400).json({ error: 'Informe método de pagamento, canal, endereço ou retirada e CEP (vazio para retirada)' })
     return
   }
 
@@ -85,22 +87,30 @@ routes.post('/pedidos', async (req, res) => {
   }
 
   try {
-    const pedido = await db.pedido.create({
+    const pedido = await db.$transaction(async (tx) => {
+      const restaurante = restauranteId === undefined ? undefined : parseId(restauranteId)
+      if (restaurante === null) throw new ErroOperacao(400, 'restauranteId inválido')
+      const preparados = await prepararItensPedido(tx, itens, restaurante)
+      const canal = app.trim().toLowerCase()
+      // Nos pedidos manuais o valor vem do catálogo, sem confiar no total enviado pela tela.
+      const total = ['balcao', 'whatsapp'].includes(canal) ? preparados.preco : Number(preco)
+      if (!Number.isFinite(Number(total)) || Number(total) < 0 || Number(total) > 99_999_999.99) {
+        throw new ErroOperacao(400, 'Preço do pedido inválido')
+      }
+      return tx.pedido.create({
       data: {
+        restauranteId: preparados.restauranteId,
         nomeCliente: nomeCliente || null,
         clienteId: clienteId ? Number(clienteId) : null,
-        preco,
+        preco: total,
         metodoPagamento,
-        app,
+        app: canal,
         enderecoDestino,
         cepDestino,
         latitude: latitude === undefined ? null : Number(latitude),
         longitude: longitude === undefined ? null : Number(longitude),
         itens: {
-          create: itens.map((item: { produtoId: number; quantidade: number }) => ({
-            produtoId: Number(item.produtoId),
-            quantidade: Number(item.quantidade),
-          })),
+          create: preparados.itens,
         },
         ...(entregadorId && {
           entrega: {
@@ -111,13 +121,12 @@ routes.post('/pedidos', async (req, res) => {
           },
         }),
       },
-      include: {
-        itens: { include: { produto: true } },
-        entrega: { include: { entregador: true } },
-      },
+      include: incluirPedido,
+      })
     })
     res.status(201).json(pedido)
   } catch (error: any) {
+    if (error instanceof ErroOperacao) { res.status(error.status).json({ error: error.message }); return }
     res.status(500).json({ error: 'Erro ao criar pedido', detalhe: error.message })
   }
 })
@@ -139,22 +148,13 @@ routes.patch('/pedidos/:id/status', async (req, res) => {
   }
 
   try {
-    const existente = await db.pedido.findUnique({ where: { id } })
-    if (!existente) {
-      res.status(404).json({ error: 'Pedido não encontrado' })
-      return
-    }
-
-    const pedido = await db.pedido.update({
-      where: { id },
-      data: { status },
-      include: {
-        itens: { include: { produto: true } },
-        entrega: { include: { entregador: true } },
-      },
+    const pedido = await db.$transaction(async (tx) => {
+      await mudarStatusPedido(tx, id, status)
+      return tx.pedido.findUnique({ where: { id }, include: incluirPedido })
     })
     res.json(pedido)
   } catch (error: any) {
+    if (error instanceof ErroOperacao) { res.status(error.status).json({ error: error.message }); return }
     res.status(500).json({ error: 'Erro ao atualizar status', detalhe: error.message })
   }
 })
@@ -211,7 +211,12 @@ routes.delete('/pedidos/:id', async (req, res) => {
       return
     }
 
-    await db.pedido.delete({ where: { id } })
+    // Pedidos aceitos precisam ser cancelados antes de apagar, para devolver o estoque.
+    const removido = await db.pedido.deleteMany({ where: { id, estoqueBaixado: false } })
+    if (removido.count === 0) {
+      res.status(409).json({ error: 'Cancele o pedido antes de excluir. Pedidos entregues devem ser preservados' })
+      return
+    }
     res.status(204).send()
   } catch (error: any) {
     res.status(500).json({ error: 'Erro ao deletar pedido', detalhe: error.message })
@@ -248,6 +253,8 @@ const arredondar = (valor: number) => Math.round(valor * 100) / 100
 routes.get('/relatorios/vendas', async (req, res) => {
   const inicio = parseDia(req.query.inicio)
   const fim = parseDia(req.query.fim)
+  const restauranteId = req.query.restauranteId === undefined ? undefined : parseId(String(req.query.restauranteId))
+  if (restauranteId === null) { res.status(400).json({ error: 'restauranteId inválido' }); return }
 
   if (!inicio || !fim || inicio > fim) {
     res.status(400).json({ error: 'inicio e fim são obrigatórios, no formato AAAA-MM-DD, com inicio <= fim' })
@@ -266,6 +273,7 @@ routes.get('/relatorios/vendas', async (req, res) => {
     // abaixo, pelo dia de cada pedido no fuso do restaurante.
     const candidatos = await db.pedido.findMany({
       where: {
+        ...(restauranteId && { restauranteId }),
         status: { in: STATUS_CONCLUIDOS },
         criadoEm: {
           gte: new Date(inicio.getTime() - DIA_MS),
