@@ -5,6 +5,7 @@ import {
   type StatusAtivo,
   type StatusPedido,
 } from '@/data/pedidos';
+import { requisitarApi } from './http';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_PEDIDOS_URL ?? 'http://localhost:3002/api';
 
@@ -19,6 +20,7 @@ type PedidoApi = {
   criadoEm: string;
   itens: { quantidade: number; produto: { nome: string } }[];
   entrega: { entregador: { nome: string } | null } | null;
+  restaurante: { id: number; nome: string } | null;
 };
 
 // O campo `app` chega como identificador da plataforma (ex.: "ubereats").
@@ -40,6 +42,7 @@ function converter(pedido: PedidoApi): Pedido {
   const entregador = pedido.entrega?.entregador?.nome;
   return {
     numero: pedido.id,
+    restaurante: pedido.restaurante?.nome ?? 'Restaurante não identificado',
     canal: nomeDoCanal(pedido.app),
     cliente: pedido.nomeCliente ?? 'Cliente não identificado',
     horario: formatarHora(new Date(pedido.criadoEm)),
@@ -53,17 +56,29 @@ function converter(pedido: PedidoApi): Pedido {
 }
 
 export async function requisitar<T>(caminho: string, init?: RequestInit): Promise<T> {
-  const resposta = await fetch(`${BASE_URL}${caminho}`, init);
-  if (!resposta.ok) {
-    throw new Error(`api-pedidos respondeu ${resposta.status}`);
-  }
-  return resposta.json();
+  return requisitarApi<T>(BASE_URL, caminho, init);
 }
 
-/** Pedidos da fila (novos, em preparo e prontos), do mais recente para o mais antigo. */
-export async function listarPedidosAtivos(): Promise<Pedido[]> {
-  const pedidos = await requisitar<PedidoApi[]>(`/pedidos?status=${STATUS_ATIVOS.join(',')}`);
+/** Pedidos ativos, incluindo os que estão em entrega, do mais recente para o mais antigo. */
+export async function listarPedidosAtivos(restauranteId?: number): Promise<Pedido[]> {
+  const pedidos = await requisitar<PedidoApi[]>(`/pedidos?status=${STATUS_ATIVOS.join(',')}${restauranteId ? `&restauranteId=${restauranteId}` : ''}`);
   return pedidos.map(converter);
+}
+
+export type NovoPedido = {
+  restauranteId: number;
+  nomeCliente: string;
+  app: 'balcao' | 'whatsapp';
+  metodoPagamento: string;
+  enderecoDestino: string;
+  cepDestino: string;
+  itens: { produtoId: number; quantidade: number }[];
+};
+
+export async function criarPedido(dados: NovoPedido): Promise<void> {
+  await requisitar('/pedidos', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados),
+  });
 }
 
 export async function atualizarStatus(numero: number, status: StatusPedido): Promise<void> {
