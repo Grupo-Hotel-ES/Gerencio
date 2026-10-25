@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { CartaoResumo, Grade, Pagina, useLarguraConteudo } from '@/components/dashboard/pagina';
@@ -11,6 +11,12 @@ import {
   type StatusMotoboy,
 } from '@/data/motoboys';
 import { useCores } from '@/hooks/use-cores';
+import {
+  atualizarMotoboy,
+  atualizarStatusMotoboy,
+  criarMotoboy,
+  listarMotoboys,
+} from '@/services/api-motoboys';
 
 type FiltroStatus = 'todos' | StatusMotoboy;
 
@@ -25,7 +31,11 @@ export default function ControleDeMotoboys() {
   const cores = useCores();
   const larguraConteudo = useLarguraConteudo();
 
-  const [motoboys, setMotoboys] = useState<Motoboy[]>(MOTOBOYS_DEMO);
+  const [motoboys, setMotoboys] = useState<Motoboy[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [salvando, setSalvando] = useState(false);
+  const [erroApi, setErroApi] = useState<string | null>(null);
+
   const [filtro, setFiltro] = useState<FiltroStatus>('todos');
   const [busca, setBusca] = useState('');
   const [buscando, setBuscando] = useState(false);
@@ -40,6 +50,25 @@ export default function ControleDeMotoboys() {
   const [placa, setPlaca] = useState('');
   const [statusForm, setStatusForm] = useState<StatusMotoboy>('disponivel');
   const [erroForm, setErroForm] = useState<string | null>(null);
+
+  const carregar = useCallback(async () => {
+    try {
+      setCarregando(true);
+      const lista = await listarMotoboys();
+      setMotoboys(lista);
+      setErroApi(null);
+    } catch {
+      // Fallback para massa de demonstração caso a API não esteja respondendo
+      setMotoboys((atuais) => (atuais.length > 0 ? atuais : MOTOBOYS_DEMO));
+      setErroApi('Não foi possível sincronizar com o backend. Exibindo dados locais.');
+    } finally {
+      setCarregando(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    carregar();
+  }, [carregar]);
 
   // Métricas calculadas
   const disponiveis = motoboys.filter((m) => m.status === 'disponivel').length;
@@ -95,53 +124,69 @@ export default function ControleDeMotoboys() {
     setErroForm(null);
   };
 
-  const salvarFormulario = () => {
+  const salvarFormulario = async () => {
     if (!nome.trim() || !telefone.trim() || !cpf.trim()) {
       setErroForm('Nome, CPF e telefone são obrigatórios.');
       return;
     }
 
-    if (motoboyEmEdicao) {
-      // Edição
-      setMotoboys((atuais) =>
-        atuais.map((m) =>
-          m.id === motoboyEmEdicao.id
-            ? {
-                ...m,
-                nome: nome.trim(),
-                cpf: cpf.trim(),
-                telefone: telefone.trim(),
-                email: email.trim(),
-                placa: placa.trim() || undefined,
-                status: statusForm,
-              }
-            : m,
-        ),
-      );
-    } else {
-      // Cadastro novo
-      const novoId = motoboys.length > 0 ? Math.max(...motoboys.map((m) => m.id)) + 1 : 1;
-      const novoMotoboy: Motoboy = {
-        id: novoId,
-        nome: nome.trim(),
-        cpf: cpf.trim(),
-        telefone: telefone.trim(),
-        email: email.trim(),
-        placa: placa.trim() || undefined,
-        status: statusForm,
-        entregasHoje: 0,
-      };
-      setMotoboys((atuais) => [novoMotoboy, ...atuais]);
-    }
+    setSalvando(true);
+    setErroForm(null);
 
-    fecharFormulario();
+    try {
+      if (motoboyEmEdicao) {
+        // Atualizar via API
+        const atualizado = await atualizarMotoboy(motoboyEmEdicao.id, {
+          nome: nome.trim(),
+          cpf: cpf.trim(),
+          telefone: telefone.trim(),
+          email: email.trim(),
+          placa: placa.trim() || undefined,
+          status: statusForm,
+        });
+
+        setMotoboys((atuais) =>
+          atuais.map((m) => (m.id === atualizado.id ? atualizado : m)),
+        );
+      } else {
+        // Criar via API
+        const novo = await criarMotoboy({
+          nome: nome.trim(),
+          cpf: cpf.trim(),
+          telefone: telefone.trim(),
+          email: email.trim(),
+          placa: placa.trim() || undefined,
+          status: statusForm,
+        });
+
+        setMotoboys((atuais) => [novo, ...atuais]);
+      }
+
+      fecharFormulario();
+    } catch (err: any) {
+      setErroForm(err.message || 'Erro ao salvar informações do entregador.');
+    } finally {
+      setSalvando(false);
+    }
   };
 
-  const alternarStatus = (m: Motoboy) => {
+  const alternarStatus = async (m: Motoboy) => {
     const novoStatus: StatusMotoboy = m.status === 'inativo' ? 'disponivel' : 'inativo';
+
+    // Atualização otimista
     setMotoboys((atuais) =>
       atuais.map((item) => (item.id === m.id ? { ...item, status: novoStatus } : item)),
     );
+
+    try {
+      await atualizarStatusMotoboy(m.id, novoStatus);
+    } catch (err: any) {
+      // Reverter se falhar
+      setMotoboys((atuais) =>
+        atuais.map((item) => (item.id === m.id ? { ...item, status: m.status } : item)),
+      );
+      setErroApi(err.message || 'Erro ao atualizar situação na API.');
+    }
   };
 
   const corDoStatus = (status: StatusMotoboy) => {
@@ -167,12 +212,14 @@ export default function ControleDeMotoboys() {
       titulo="Controle de motoboys"
       subtitulo="Acompanhe a disponibilidade, gerencie entregadores e organize suas entregas."
       acao={
-        <Botao
-          rotulo="Cadastrar motoboy"
-          icone="mais"
-          variante="primario"
-          onPress={abrirFormularioNovo}
-        />
+        <View style={styles.cabecalhoAcoes}>
+          <Botao
+            rotulo="Cadastrar motoboy"
+            icone="mais"
+            variante="primario"
+            onPress={abrirFormularioNovo}
+          />
+        </View>
       }>
       <Grade colunas={emColunas ? 4 : 2}>
         <CartaoResumo
@@ -196,6 +243,18 @@ export default function ControleDeMotoboys() {
           detalhe={inativos === 0 ? 'Todos disponíveis ou em rota' : 'Sem escala no momento'}
         />
       </Grade>
+
+      {erroApi && (
+        <Cartao
+          style={[
+            styles.alertaAviso,
+            { backgroundColor: cores.fundo, borderColor: cores.statusPronto },
+          ]}>
+          <Texto peso={500} cor="textoSecundario">
+            {erroApi}
+          </Texto>
+        </Cartao>
+      )}
 
       {formularioAberto && (
         <Cartao style={styles.cartaoFormulario}>
@@ -348,7 +407,13 @@ export default function ControleDeMotoboys() {
           <View style={styles.botoesFormulario}>
             <Botao rotulo="Cancelar" variante="contorno" onPress={fecharFormulario} />
             <Botao
-              rotulo={motoboyEmEdicao ? 'Salvar alterações' : 'Confirmar cadastro'}
+              rotulo={
+                salvando
+                  ? 'Salvando…'
+                  : motoboyEmEdicao
+                    ? 'Salvar alterações'
+                    : 'Confirmar cadastro'
+              }
               icone="salvar"
               variante="primario"
               onPress={salvarFormulario}
@@ -415,7 +480,11 @@ export default function ControleDeMotoboys() {
             </Texto>
           </View>
 
-          {visiveis.length === 0 ? (
+          {carregando && motoboys.length === 0 ? (
+            <View style={styles.linhaVazia}>
+              <Texto cor="textoSecundario">Carregando entregadores…</Texto>
+            </View>
+          ) : visiveis.length === 0 ? (
             <View style={styles.linhaVazia}>
               <Texto cor="textoSecundario">Nenhum motoboy encontrado com o filtro atual.</Texto>
             </View>
@@ -507,6 +576,11 @@ export default function ControleDeMotoboys() {
 }
 
 const styles = StyleSheet.create({
+  cabecalhoAcoes: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Espacamento.small,
+  },
   tabela: {
     padding: Espacamento.large,
     gap: Espacamento.large,
@@ -587,6 +661,11 @@ const styles = StyleSheet.create({
   cartaoFormulario: {
     padding: Espacamento.large,
     gap: Espacamento.large,
+    borderWidth: 1,
+  },
+  alertaAviso: {
+    padding: Espacamento.medium,
+    borderRadius: Raio.small,
     borderWidth: 1,
   },
   alertaErro: {

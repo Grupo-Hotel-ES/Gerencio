@@ -152,6 +152,30 @@ routes.patch('/pedidos/:id/status', async (req, res) => {
       await mudarStatusPedido(tx, id, status)
       return tx.pedido.findUnique({ where: { id }, include: incluirPedido })
     })
+
+    // Sincroniza status do entregador se houver entrega vinculada
+    if (pedido.entrega?.entregadorId) {
+      if (status === StatusPedido.saiu_para_entrega) {
+        await db.funcionario.update({
+          where: { id: pedido.entrega.entregadorId },
+          data: { status: StatusEntregador.em_entrega },
+        }).catch(() => {})
+      } else if (status === StatusPedido.entregue || status === StatusPedido.cancelado) {
+        const entregasPendentes = await db.entrega.count({
+          where: {
+            entregadorId: pedido.entrega.entregadorId,
+            pedido: { status: StatusPedido.saiu_para_entrega },
+          },
+        })
+        if (entregasPendentes === 0) {
+          await db.funcionario.update({
+            where: { id: pedido.entrega.entregadorId },
+            data: { status: StatusEntregador.disponivel },
+          }).catch(() => {})
+        }
+      }
+    }
+
     res.json(pedido)
   } catch (error: any) {
     if (error instanceof ErroOperacao) { res.status(error.status).json({ error: error.message }); return }
@@ -189,6 +213,13 @@ routes.patch('/pedidos/:id/entregador', async (req, res) => {
       },
       include: { entregador: true },
     })
+
+    if (pedido.status === StatusPedido.saiu_para_entrega) {
+      await db.funcionario.update({
+        where: { id: Number(entregadorId) },
+        data: { status: StatusEntregador.em_entrega },
+      }).catch(() => {})
+    }
 
     res.json(entrega)
   } catch (error: any) {
@@ -333,6 +364,323 @@ routes.get('/relatorios/vendas', async (req, res) => {
     })
   } catch (error: any) {
     res.status(500).json({ error: 'Erro ao gerar relatório de vendas', detalhe: error.message })
+  }
+})
+
+// ============================================
+// ENTREGADORES (MOTOBOYS)
+// ============================================
+
+// 8. LISTAR ENTREGADORES
+routes.get('/entregadores', async (req, res) => {
+  const filtro = typeof req.query.status === 'string' ? req.query.status.split(',') : []
+  const status = filtro.filter((s): s is StatusEntregador =>
+    Object.values(StatusEntregador).includes(s as StatusEntregador),
+  )
+
+  if (status.length !== filtro.length) {
+    res.status(400).json({
+      error: `status deve ser um de: ${Object.values(StatusEntregador).join(', ')}`,
+    })
+    return
+  }
+
+  const busca = typeof req.query.busca === 'string' ? req.query.busca.trim() : ''
+
+  const inicioDoDia = new Date()
+  inicioDoDia.setHours(0, 0, 0, 0)
+
+  try {
+    const entregadores = await db.funcionario.findMany({
+      where: {
+        tipo: TipoFuncionario.ENTREGADOR,
+        ...(status.length > 0 && { status: { in: status } }),
+        ...(busca && {
+          OR: [
+            { nome: { contains: busca, mode: 'insensitive' } },
+            { telefone: { contains: busca } },
+            { cpf: { contains: busca } },
+            { placa: { contains: busca, mode: 'insensitive' } },
+          ],
+        }),
+      },
+      include: {
+        entregas: {
+          where: {
+            dataHora: { gte: inicioDoDia },
+          },
+          select: { id: true },
+        },
+      },
+      orderBy: { nome: 'asc' },
+    })
+
+    const resultado = entregadores.map((e) => ({
+      id: e.id,
+      nome: e.nome,
+      cpf: e.cpf,
+      telefone: e.telefone,
+      email: e.email,
+      placa: e.placa ?? undefined,
+      status: e.status ?? StatusEntregador.disponivel,
+      entregasHoje: e.entregas.length,
+    }))
+
+    res.json(resultado)
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erro ao listar entregadores', detalhe: error.message })
+  }
+})
+
+// 9. BUSCAR ENTREGADOR POR ID
+routes.get('/entregadores/:id', async (req, res) => {
+  const id = parseId(req.params.id)
+  if (id === null) {
+    res.status(400).json({ error: 'Id inválido' })
+    return
+  }
+
+  const inicioDoDia = new Date()
+  inicioDoDia.setHours(0, 0, 0, 0)
+
+  try {
+    const entregador = await db.funcionario.findFirst({
+      where: { id, tipo: TipoFuncionario.ENTREGADOR },
+      include: {
+        entregas: {
+          where: {
+            dataHora: { gte: inicioDoDia },
+          },
+          select: { id: true },
+        },
+      },
+    })
+
+    if (!entregador) {
+      res.status(404).json({ error: 'Entregador não encontrado' })
+      return
+    }
+
+    res.json({
+      id: entregador.id,
+      nome: entregador.nome,
+      cpf: entregador.cpf,
+      telefone: entregador.telefone,
+      email: entregador.email,
+      placa: entregador.placa ?? undefined,
+      status: entregador.status ?? StatusEntregador.disponivel,
+      entregasHoje: entregador.entregas.length,
+    })
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erro ao buscar entregador', detalhe: error.message })
+  }
+})
+
+// 10. CRIAR ENTREGADOR
+routes.post('/entregadores', async (req, res) => {
+  const { nome, cpf, telefone, email, placa, status } = req.body
+
+  if (!nome || !cpf || !telefone) {
+    res.status(400).json({ error: 'Campos obrigatórios ausentes (nome, cpf, telefone)' })
+    return
+  }
+
+  let statusFinal: StatusEntregador = StatusEntregador.disponivel
+  if (status) {
+    if (!Object.values(StatusEntregador).includes(status)) {
+      res.status(400).json({
+        error: `status inválido. Deve ser um de: ${Object.values(StatusEntregador).join(', ')}`,
+      })
+      return
+    }
+    statusFinal = status
+  }
+
+  try {
+    const cpfLimpo = String(cpf).trim()
+    const existente = await db.funcionario.findUnique({ where: { cpf: cpfLimpo } })
+    if (existente) {
+      res.status(409).json({ error: 'Já existe um funcionário cadastrado com este CPF' })
+      return
+    }
+
+    const novo = await db.funcionario.create({
+      data: {
+        nome: String(nome).trim(),
+        cpf: cpfLimpo,
+        telefone: String(telefone).trim(),
+        email: email ? String(email).trim() : '',
+        placa: placa ? String(placa).trim() : null,
+        tipo: TipoFuncionario.ENTREGADOR,
+        status: statusFinal,
+      },
+    })
+
+    res.status(201).json({
+      id: novo.id,
+      nome: novo.nome,
+      cpf: novo.cpf,
+      telefone: novo.telefone,
+      email: novo.email,
+      placa: novo.placa ?? undefined,
+      status: novo.status ?? StatusEntregador.disponivel,
+      entregasHoje: 0,
+    })
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erro ao cadastrar entregador', detalhe: error.message })
+  }
+})
+
+// 11. ATUALIZAR ENTREGADOR
+routes.put('/entregadores/:id', async (req, res) => {
+  const id = parseId(req.params.id)
+  if (id === null) {
+    res.status(400).json({ error: 'Id inválido' })
+    return
+  }
+
+  const { nome, cpf, telefone, email, placa, status } = req.body
+
+  if (!nome || !cpf || !telefone) {
+    res.status(400).json({ error: 'Campos obrigatórios ausentes (nome, cpf, telefone)' })
+    return
+  }
+
+  if (status && !Object.values(StatusEntregador).includes(status)) {
+    res.status(400).json({
+      error: `status inválido. Deve ser um de: ${Object.values(StatusEntregador).join(', ')}`,
+    })
+    return
+  }
+
+  try {
+    const entregador = await db.funcionario.findFirst({
+      where: { id, tipo: TipoFuncionario.ENTREGADOR },
+    })
+    if (!entregador) {
+      res.status(404).json({ error: 'Entregador não encontrado' })
+      return
+    }
+
+    const cpfLimpo = String(cpf).trim()
+    if (cpfLimpo !== entregador.cpf) {
+      const outro = await db.funcionario.findUnique({ where: { cpf: cpfLimpo } })
+      if (outro && outro.id !== id) {
+        res.status(409).json({ error: 'Outro funcionário já possui este CPF' })
+        return
+      }
+    }
+
+    const inicioDoDia = new Date()
+    inicioDoDia.setHours(0, 0, 0, 0)
+
+    const atualizado = await db.funcionario.update({
+      where: { id },
+      data: {
+        nome: String(nome).trim(),
+        cpf: cpfLimpo,
+        telefone: String(telefone).trim(),
+        email: email !== undefined ? String(email).trim() : entregador.email,
+        placa: placa !== undefined ? (placa ? String(placa).trim() : null) : entregador.placa,
+        ...(status && { status }),
+      },
+      include: {
+        entregas: {
+          where: { dataHora: { gte: inicioDoDia } },
+          select: { id: true },
+        },
+      },
+    })
+
+    res.json({
+      id: atualizado.id,
+      nome: atualizado.nome,
+      cpf: atualizado.cpf,
+      telefone: atualizado.telefone,
+      email: atualizado.email,
+      placa: atualizado.placa ?? undefined,
+      status: atualizado.status ?? StatusEntregador.disponivel,
+      entregasHoje: atualizado.entregas.length,
+    })
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erro ao atualizar entregador', detalhe: error.message })
+  }
+})
+
+// 12. ATUALIZAR STATUS DO ENTREGADOR
+routes.patch('/entregadores/:id/status', async (req, res) => {
+  const id = parseId(req.params.id)
+  const { status } = req.body
+
+  if (id === null || !status) {
+    res.status(400).json({ error: 'Id e status são obrigatórios' })
+    return
+  }
+
+  if (!Object.values(StatusEntregador).includes(status)) {
+    res.status(400).json({
+      error: `status inválido. Deve ser um de: ${Object.values(StatusEntregador).join(', ')}`,
+    })
+    return
+  }
+
+  try {
+    const entregador = await db.funcionario.findFirst({
+      where: { id, tipo: TipoFuncionario.ENTREGADOR },
+    })
+    if (!entregador) {
+      res.status(404).json({ error: 'Entregador não encontrado' })
+      return
+    }
+
+    const atualizado = await db.funcionario.update({
+      where: { id },
+      data: { status },
+    })
+
+    res.json({
+      id: atualizado.id,
+      status: atualizado.status,
+    })
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erro ao atualizar status do entregador', detalhe: error.message })
+  }
+})
+
+// 13. DELETAR ENTREGADOR
+routes.delete('/entregadores/:id', async (req, res) => {
+  const id = parseId(req.params.id)
+  if (id === null) {
+    res.status(400).json({ error: 'Id inválido' })
+    return
+  }
+
+  try {
+    const entregador = await db.funcionario.findFirst({
+      where: { id, tipo: TipoFuncionario.ENTREGADOR },
+    })
+    if (!entregador) {
+      res.status(404).json({ error: 'Entregador não encontrado' })
+      return
+    }
+
+    const totalEntregas = await db.entrega.count({ where: { entregadorId: id } })
+    if (totalEntregas > 0) {
+      await db.funcionario.update({
+        where: { id },
+        data: { status: StatusEntregador.inativo },
+      })
+      res.status(200).json({
+        mensagem: 'Entregador inativado pois possui entregas registradas no histórico',
+        status: StatusEntregador.inativo,
+      })
+      return
+    }
+
+    await db.funcionario.delete({ where: { id } })
+    res.status(204).send()
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erro ao deletar entregador', detalhe: error.message })
   }
 })
 
