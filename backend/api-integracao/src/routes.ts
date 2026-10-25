@@ -242,7 +242,7 @@ const ubereats: AdapterPlataforma = {
     const authRes = await fetch(`${mockUrl}/oauth/v2/token`, { method: 'POST' });
     if (!authRes.ok) throw new Error('Falha ao obter token OAuth do Uber Eats');
     
-    const { access_token } = await authRes.json();
+    const { access_token } = (await authRes.json()) as { access_token?: string };
 
     // O mock monta o resource_href com localhost; em container, troca a origem pela do MOCK_API_URL
     const urlPedido = process.env.MOCK_API_URL

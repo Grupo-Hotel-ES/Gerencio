@@ -67,6 +67,7 @@ model Funcionario {
   cpf      String               @unique
   telefone String
   email    String
+  placa    String?
   tipo     TipoFuncionario      @default(ENTREGADOR)
   status   StatusEntregador?
   vinculos VinculoFuncionario[]
