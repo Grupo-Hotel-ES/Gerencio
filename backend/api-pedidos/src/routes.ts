@@ -4,7 +4,7 @@ import { db, parseId, StatusPedido, ErroOperacao, prepararItensPedido, mudarStat
 const routes = Router()
 const incluirPedido = { itens: { include: { produto: true } }, entrega: { include: { entregador: true } }, restaurante: true } as const
 
-// 1. LISTAR PEDIDOS (opcionalmente filtrando por status: ?status=novo,em_preparo)
+// 1. LISTAR PEDIDOS (opcionalmente filtrando por status e cliente: ?status=novo,em_preparo&clienteId=1)
 routes.get('/pedidos', async (req, res) => {
   const filtro = typeof req.query.status === 'string' ? req.query.status.split(',') : []
   const restauranteId = req.query.restauranteId === undefined ? undefined : parseId(String(req.query.restauranteId))
@@ -22,10 +22,27 @@ routes.get('/pedidos', async (req, res) => {
     return
   }
 
+  let clienteId: number | null = null
+  if (req.query.clienteId !== undefined) {
+    clienteId = parseId(String(req.query.clienteId))
+    if (clienteId === null) {
+      res.status(400).json({ error: 'clienteId inválido' })
+      return
+    }
+  }
+
   try {
     const pedidos = await db.pedido.findMany({
       where: { ...(status.length > 0 && { status: { in: status } }), ...(restauranteId && { restauranteId }) },
       include: incluirPedido,
+      where: {
+        ...(status.length > 0 && { status: { in: status } }),
+        ...(clienteId !== null && { clienteId }),
+      },
+      include: {
+        itens: { include: { produto: true } },
+        entrega: { include: { entregador: true } },
+      },
       orderBy: { id: 'desc' },
     })
     res.json(pedidos)
