@@ -39,7 +39,7 @@ Content-Type: application/json
 
 
 ### ATENÇÃO: Pegue o "idExterno" gerado na resposta do request acima para usar abaixo.
-@idPedidoUber = 52fec521-2b09-418b-b081-5babb008ec8c
+@idPedidoUber = aeee2311-b830-4007-b9f1-ade21e208a94
 
 
 ### ==========================================
