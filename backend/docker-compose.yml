@@ -84,6 +84,24 @@ services:
     build:
       context: .
       dockerfile: ./api-integracao/Dockerfile
+    ports:
+      - "3005:3005"
+    environment:
+      <<: *api-env
+      PORT: 3005
+      # O mock das plataformas publica a 3333 no host; dentro do container, localhost não chega nele
+      IFOOD_API_URL: ${MOCK_API_URL:-http://host.docker.internal:3333}
+      MOCK_API_URL: ${MOCK_API_URL:-http://host.docker.internal:3333}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Workflows do chatbot. Usa o SQLite interno do n8n (volume próprio) para não
+  # criar tabelas no banco do Prisma. Dentro da rede do compose, as APIs ficam
+  # em http://api-<nome>:<porta>/api (ex.: http://api-pedidos:3002/api).
+  chatbot:
+    container_name: geroncio-chatbot
+    restart: unless-stopped
+    build:
       context: ./chatbot
     ports:
       - "${N8N_PORT:-5678}:5678"
@@ -111,15 +129,19 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "3005:3005"
+      - "8080:8080"
     environment:
-      <<: *api-env
-      PORT: 3005
-      # O mock das plataformas publica a 3333 no host; dentro do container, localhost não chega nele
-      IFOOD_API_URL: ${MOCK_API_URL:-http://host.docker.internal:3333}
-      MOCK_API_URL: ${MOCK_API_URL:-http://host.docker.internal:3333}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      DOCKER_ENV: "true"
+      SERVER_URL: ${EVOLUTION_SERVER_URL:-http://localhost:8080}
+      AUTHENTICATION_API_KEY: ${AUTHENTICATION_API_KEY:?defina AUTHENTICATION_API_KEY no backend/.env}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:-geroncio}:${POSTGRES_PASSWORD:-geroncio_dev}@postgres:5432/${POSTGRES_DB:-geroncio}?schema=evolution
+      DATABASE_CONNECTION_CLIENT_NAME: evolution
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+    volumes:
+      - evolution_instances:/evolution/instances
 
   # LLM local do chatbot. O modelo vem de OLLAMA_MODEL e é baixado na primeira
   # subida (fica no volume). O n8n acessa em http://llm:11434 (nó "Ollama").

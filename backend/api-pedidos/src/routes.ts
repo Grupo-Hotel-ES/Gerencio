@@ -33,16 +33,12 @@ routes.get('/pedidos', async (req, res) => {
 
   try {
     const pedidos = await db.pedido.findMany({
-      where: { ...(status.length > 0 && { status: { in: status } }), ...(restauranteId && { restauranteId }) },
-      include: incluirPedido,
       where: {
         ...(status.length > 0 && { status: { in: status } }),
+        ...(restauranteId && { restauranteId }),
         ...(clienteId !== null && { clienteId }),
       },
-      include: {
-        itens: { include: { produto: true } },
-        entrega: { include: { entregador: true } },
-      },
+      include: incluirPedido,
       orderBy: { id: 'desc' },
     })
     res.json(pedidos)
