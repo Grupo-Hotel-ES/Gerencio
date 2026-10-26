@@ -282,7 +282,7 @@ const payloadEvento = pedidoRappi
 
   if (pedidoRappi) void notificarWebhookRappi(pedido.eventos[0]!.id, pedidoRappi);
   if (pedidoIFood) {
-    void fetch("http://localhost:3005/api/webhooks/ifood", {
+    void fetch(process.env["IFOOD_WEBHOOK_URL"] ?? "http://localhost:3005/api/webhooks/ifood", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify([payloadEvento]),

@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { db, parseId } from '@geroncio/shared-db'
+import { db, parseId, ErroOperacao } from '@geroncio/shared-db'
 
 const routes = Router()
 
@@ -7,12 +7,13 @@ const routes = Router()
 
 routes.post('/produtos', async (req, res) => {
   try {
-    const { nome, preco, restauranteId } = req.body
+    const { nome, preco, restauranteId, categoria = 'Sem categoria', quantidade = 0 } = req.body
 
     const parsedRestauranteId = parseId(restauranteId)
     const parsedPreco = Number(preco)
 
-    if (!nome || isNaN(parsedPreco) || parsedRestauranteId === null) {
+    if (typeof nome !== 'string' || !nome.trim() || preco === null || preco === '' || !Number.isFinite(parsedPreco) || parsedPreco < 0 || parsedPreco > 99_999_999.99 || parsedRestauranteId === null ||
+        typeof categoria !== 'string' || !categoria.trim() || !Number.isInteger(quantidade) || quantidade < 0 || quantidade > 1_000_000) {
       res.status(400).json({ error: 'Nome, preço e restauranteId válidos são obrigatórios.' })
       return
     }
@@ -28,7 +29,9 @@ routes.post('/produtos', async (req, res) => {
 
     const produto = await db.produto.create({
       data: {
-        nome,
+        nome: nome.trim(),
+        categoria: categoria.trim(),
+        quantidade,
         preco: parsedPreco,
         restaurante: {
           connect: { id: parsedRestauranteId },
@@ -44,10 +47,45 @@ routes.post('/produtos', async (req, res) => {
 })
 
 routes.get('/produtos', async (req, res) => {
+  const restauranteId = req.query.restauranteId === undefined ? undefined : parseId(String(req.query.restauranteId))
+  if (restauranteId === null) { res.status(400).json({ error: 'restauranteId inválido' }); return }
   const produtos = await db.produto.findMany({
+    where: restauranteId ? { restauranteId } : {},
     include: { restaurante: true },
+    orderBy: { nome: 'asc' },
   })
   res.json(produtos)
+})
+
+// Ajuste de saldo com controle de versão: uma venda simultânea nunca é sobrescrita.
+routes.patch('/estoque', async (req, res) => {
+  const { ajustes } = req.body
+  if (!Array.isArray(ajustes) || ajustes.length === 0 || ajustes.length > 500 ||
+      ajustes.some((item) => !item || !Number.isInteger(item.produtoId) || item.produtoId <= 0 ||
+        !Number.isInteger(item.quantidade) || item.quantidade < 0 || item.quantidade > 1_000_000 ||
+        !Number.isInteger(item.versaoEstoque) || item.versaoEstoque < 0) ||
+      new Set(ajustes.map((item) => item.produtoId)).size !== ajustes.length) {
+    res.status(400).json({ error: 'Informe produtos distintos, saldo inteiro não negativo e versão do estoque' })
+    return
+  }
+  try {
+    const produtos = await db.$transaction(async (tx) => {
+      for (const ajuste of [...ajustes].sort((a, b) => a.produtoId - b.produtoId)) {
+        const atualizado = await tx.produto.updateMany({
+          where: { id: ajuste.produtoId, versaoEstoque: ajuste.versaoEstoque },
+          data: { quantidade: ajuste.quantidade, versaoEstoque: { increment: 1 } },
+        })
+        if (atualizado.count !== 1) {
+          throw new ErroOperacao(409, 'O estoque mudou durante a edição. Recarregue os saldos e refaça os ajustes')
+        }
+      }
+      return tx.produto.findMany({ where: { id: { in: ajustes.map((item) => item.produtoId) } }, include: { restaurante: true } })
+    })
+    res.json(produtos)
+  } catch (error: any) {
+    if (error instanceof ErroOperacao) { res.status(error.status).json({ error: error.message }); return }
+    res.status(500).json({ error: 'Erro ao salvar estoque', detalhe: error.message })
+  }
 })
 
 routes.get('/produtos/:id', async (req, res) => {
@@ -87,8 +125,13 @@ routes.put('/produtos/:id', async (req, res) => {
   const parsedPreco = Number(preco)
   const parsedRestauranteId = parseId(restauranteId)
 
-  if (!nome || isNaN(parsedPreco) || parsedRestauranteId === null) {
+  if (typeof nome !== 'string' || !nome.trim() || preco === null || preco === '' || !Number.isFinite(parsedPreco) || parsedPreco < 0 || parsedPreco > 99_999_999.99 || parsedRestauranteId === null) {
     res.status(400).json({ error: 'Nome, preço e restauranteId são obrigatórios.' })
+    return
+  }
+
+  if (parsedRestauranteId !== produtoExistente.restauranteId) {
+    res.status(400).json({ error: 'O restaurante de um produto não pode ser alterado' })
     return
   }
 
@@ -120,6 +163,13 @@ routes.patch('/produtos/:id', async (req, res) => {
   }
 
   const { nome, preco, restauranteId } = req.body
+
+  if ((nome !== undefined && (typeof nome !== 'string' || !nome.trim())) ||
+      (preco !== undefined && (preco === null || preco === '' || !Number.isFinite(Number(preco)) || Number(preco) < 0 || Number(preco) > 99_999_999.99)) ||
+      (restauranteId !== undefined && Number(restauranteId) !== produtoExistente.restauranteId)) {
+    res.status(400).json({ error: 'Nome ou preço inválido, ou tentativa de alterar o restaurante do produto' })
+    return
+  }
 
   const dataToUpdate: Record<string, unknown> = {}
   if (nome !== undefined) dataToUpdate.nome = nome
@@ -154,6 +204,10 @@ routes.delete('/produtos/:id', async (req, res) => {
     return
   }
 
+  if (await db.itemPedido.count({ where: { produtoId: id } })) {
+    res.status(409).json({ error: 'Produto usado em pedidos não pode ser excluído. Ajuste o estoque para zero' })
+    return
+  }
   await db.produto.delete({ where: { id } })
   res.status(204).send()
 })

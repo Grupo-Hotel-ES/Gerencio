@@ -1,6 +1,6 @@
 import { Router, type Request } from 'express'
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { db, type Prisma } from '@geroncio/shared-db'
+import { db, prepararItensPedido, type Prisma } from '@geroncio/shared-db'
 
 const routes = Router()
 
@@ -12,10 +12,10 @@ const routes = Router()
 export type RequestComCorpoBruto = Request & { corpoBruto?: Buffer }
 
 /** Plataformas que notificam novos pedidos via webhook ou polling. */
-type Plataforma = 'ifood' | '99food' | 'keeta' | 'ubereats' | 'rappi'
+export type Plataforma = 'ifood' | '99food' | 'keeta' | 'ubereats' | 'rappi'
 
 /** Notificação já normalizada, extraída do corpo do webhook ou do poller. */
-interface NotificacaoPedido {
+export interface NotificacaoPedido {
   eventoId: string
   pedidoIdExterno: string
   lojaIdExterno?: string
@@ -80,12 +80,19 @@ const ifood: AdapterPlataforma = {
     const eventos = Array.isArray(corpo) ? corpo : [corpo]
     return eventos
       .filter((e) => e && (e.code === 'PLACED' || e.fullCode === 'PLACED' || e.tipo === 'PLACED'))
-      .map((e) => ({
-        eventoId: e.id ?? `ifood-evt-${e.orderId ?? e.pedidoId}`,
-        pedidoIdExterno: String(e.orderId ?? e.pedidoId),
-        lojaIdExterno: e.merchantId ? String(e.merchantId) : undefined,
-        tipo: e.code ?? e.fullCode ?? e.tipo ?? 'PLACED',
-      }))
+      .map((e) => {
+        const eventoId = e.id
+        const pedidoIdExterno = e.orderId ?? e.pedidoId
+        if (eventoId === undefined || eventoId === null || pedidoIdExterno === undefined || pedidoIdExterno === null) {
+          throw new Error('Evento iFood sem id ou orderId')
+        }
+        return {
+          eventoId: String(eventoId),
+          pedidoIdExterno: String(pedidoIdExterno),
+          lojaIdExterno: e.merchantId ? String(e.merchantId) : undefined,
+          tipo: e.code ?? e.fullCode ?? e.tipo ?? 'PLACED',
+        }
+      })
   },
 
   async buscarPedido(notificacao) {
@@ -235,9 +242,18 @@ const ubereats: AdapterPlataforma = {
     const authRes = await fetch(`${mockUrl}/oauth/v2/token`, { method: 'POST' });
     if (!authRes.ok) throw new Error('Falha ao obter token OAuth do Uber Eats');
     
-    const { access_token } = await authRes.json();
+    const autenticacao = await authRes.json() as { access_token?: unknown };
+    if (typeof autenticacao.access_token !== 'string' || !autenticacao.access_token) {
+      throw new Error('Token OAuth do Uber Eats inválido');
+    }
+    const access_token = autenticacao.access_token;
 
-    const pedidoRes = await fetch(resourceHref, {
+    // O mock monta o resource_href com localhost; em container, troca a origem pela do MOCK_API_URL
+    const urlPedido = process.env.MOCK_API_URL
+      ? new URL(new URL(resourceHref).pathname, process.env.MOCK_API_URL).toString()
+      : resourceHref;
+
+    const pedidoRes = await fetch(urlPedido, {
       headers: { 'Authorization': `Bearer ${access_token}` }
     });
 
@@ -290,7 +306,7 @@ const ADAPTERS: Record<Plataforma, AdapterPlataforma> = {
   rappi,
 }
 
-function obterAdapter(plataforma: string | undefined): AdapterPlataforma | null {
+export function obterAdapter(plataforma: string | undefined): AdapterPlataforma | null {
   if (!plataforma) return null
   return ADAPTERS[plataforma.toLowerCase() as Plataforma] ?? null
 }
@@ -300,9 +316,12 @@ function obterAdapter(plataforma: string | undefined): AdapterPlataforma | null 
 // ---------------------------------------------------------------------------
 
 /** Traduz os itens externos para produtos do Gerencio usando a tabela MapeamentoApp. */
-async function mapearItens(plataforma: Plataforma, itens: ItemExterno[]) {
-  const mapeamentos = await db.mapeamentoApp.findMany({
-    where: { plataforma, idExternoApp: { in: itens.map((item) => item.idExterno) } },
+async function mapearItens(cliente: Prisma.TransactionClient, plataforma: Plataforma, itens: ItemExterno[]) {
+  const mapeamentos = await cliente.mapeamentoApp.findMany({
+    where: {
+      plataforma: { equals: plataforma, mode: 'insensitive' },
+      idExternoApp: { in: itens.map((item) => item.idExterno) },
+    },
   })
   const produtoPorIdExterno = new Map(mapeamentos.map((m) => [m.idExternoApp, m.produtoId]))
 
@@ -315,25 +334,59 @@ async function mapearItens(plataforma: Plataforma, itens: ItemExterno[]) {
   })
 }
 
-async function salvarPedido(plataforma: Plataforma, pedido: PedidoConvertido) {
-  const data: Prisma.PedidoCreateInput = {
-    nomeCliente: pedido.nomeCliente,
-    preco: pedido.preco,
-    metodoPagamento: pedido.metodoPagamento,
-    app: plataforma,
-    enderecoDestino: pedido.enderecoDestino,
-    cepDestino: pedido.cepDestino,
-    latitude: pedido.latitude,
-    longitude: pedido.longitude,
-    itens: { create: await mapearItens(plataforma, pedido.itens) },
-  }
-  return db.pedido.create({ data })
+async function salvarPedido(
+  plataforma: Plataforma,
+  pedidoIdExterno: string,
+  pedido: PedidoConvertido,
+  eventoIntegracaoId: number,
+) {
+  return db.$transaction(async (tx) => {
+    // O identificador externo também é único no banco. Isso cobre reentregas
+    // com outro ID de evento e retomadas após uma queda do processo.
+    const existente = await tx.pedido.findFirst({
+      where: { app: plataforma, pedidoExternoId: pedidoIdExterno },
+    })
+
+    if (existente) {
+      await tx.eventoIntegracao.update({
+        where: { id: eventoIntegracaoId },
+        data: { status: 'processado', processadoEm: new Date(), ultimoErro: null, pedidoId: existente.id },
+      })
+      return existente
+    }
+
+    const preparados = await prepararItensPedido(tx, await mapearItens(tx, plataforma, pedido.itens))
+    const data: Prisma.PedidoCreateInput = {
+      restaurante: { connect: { id: preparados.restauranteId } },
+      pedidoExternoId: pedidoIdExterno,
+      nomeCliente: pedido.nomeCliente,
+      preco: pedido.preco,
+      metodoPagamento: pedido.metodoPagamento,
+      app: plataforma,
+      enderecoDestino: pedido.enderecoDestino,
+      cepDestino: pedido.cepDestino,
+      latitude: pedido.latitude,
+      longitude: pedido.longitude,
+      itens: { create: preparados.itens },
+    }
+    const salvo = await tx.pedido.create({ data })
+    await tx.eventoIntegracao.update({
+      where: { id: eventoIntegracaoId },
+      data: { status: 'processado', processadoEm: new Date(), ultimoErro: null, pedidoId: salvo.id },
+    })
+    return salvo
+  })
 }
 
-async function processarNotificacao(plataforma: Plataforma, adapter: AdapterPlataforma, notificacao: NotificacaoPedido) {
+export async function processarNotificacao(
+  plataforma: Plataforma,
+  adapter: AdapterPlataforma,
+  notificacao: NotificacaoPedido,
+  eventoIntegracaoId: number,
+) {
   const pedidoExterno = await adapter.buscarPedido(notificacao)
   const pedido = adapter.converterPedido(pedidoExterno)
-  return salvarPedido(plataforma, pedido)
+  return salvarPedido(plataforma, notificacao.pedidoIdExterno, pedido, eventoIntegracaoId)
 }
 
 // ---------------------------------------------------------------------------
@@ -363,14 +416,22 @@ routes.post('/webhooks/:plataforma', async (req, res) => {
     return
   }
 
-  res.status(202).json({ recebidas: notificacoes.length })
-
-  for (const notificacao of notificacoes) {
-    try {
-      await processarNotificacao(plataforma, adapter, notificacao)
-    } catch (error) {
-      console.error(`[${plataforma}] Erro ao processar pedido ${notificacao.pedidoIdExterno}:`, error)
-    }
+  try {
+    const resultado = await db.eventoIntegracao.createMany({
+      data: notificacoes.map((notificacao) => ({
+        plataforma,
+        eventoId: notificacao.eventoId,
+        pedidoIdExterno: notificacao.pedidoIdExterno,
+        lojaIdExterno: notificacao.lojaIdExterno,
+        tipo: notificacao.tipo,
+        payload: req.body,
+      })),
+      skipDuplicates: true,
+    })
+    res.status(202).json({ recebidas: notificacoes.length, novas: resultado.count })
+  } catch (error: any) {
+    console.error(`[${plataforma}] Erro ao registrar notificação:`, error)
+    res.status(500).json({ error: 'Não foi possível registrar a notificação', detalhe: error.message })
   }
 })
 

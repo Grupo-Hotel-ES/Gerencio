@@ -29,6 +29,14 @@ enum TipoFuncionario {
   CAIXA
 }
 
+enum StatusEventoIntegracao {
+  pendente
+  processando
+  processado
+  falhou
+  erro
+}
+
 model Restaurante {
   id          Int                    @id @default(autoincrement())
   cnpj        String                 @unique
@@ -41,6 +49,7 @@ model Restaurante {
   credenciais CredencialPlataforma[]
   vinculos    VinculoFuncionario[]
   produtos    Produto[]
+  pedidos     Pedido[]
 }
 
 model CredencialPlataforma {
@@ -80,6 +89,9 @@ model Produto {
   id            Int              @id @default(autoincrement())
   nome          String
   preco         Decimal          @db.Decimal(10, 2)
+  categoria     String           @default("Sem categoria")
+  quantidade    Int              @default(0)
+  versaoEstoque Int              @default(0) @map("versao_estoque")
   restauranteId Int              @map("restaurante_id")
   restaurante   Restaurante      @relation(fields: [restauranteId], references: [id], onDelete: Cascade)
   mapeamentos   MapeamentoApp[]
@@ -118,6 +130,10 @@ model Cliente {
 
 model Pedido {
   id              Int          @id @default(autoincrement())
+  pedidoExternoId String?      @map("pedido_externo_id")
+  restauranteId   Int?         @map("restaurante_id")
+  restaurante     Restaurante? @relation(fields: [restauranteId], references: [id])
+  estoqueBaixado  Boolean      @default(false) @map("estoque_baixado")
   nomeCliente     String?      @map("nome_cliente") // Add este campo
   clienteId       Int?         @map("cliente_id")
   cliente         Cliente?     @relation(fields: [clienteId], references: [id])
@@ -132,6 +148,37 @@ model Pedido {
   criadoEm        DateTime     @default(now()) @map("criado_em")
   itens           ItemPedido[]
   entrega         Entrega?
+  eventosIntegracao EventoIntegracao[]
+
+  @@unique([app, pedidoExternoId])
+  @@index([restauranteId, status])
+}
+
+/// Registro durável das notificações recebidas das plataformas externas.
+/// A combinação da plataforma com o evento e com o pedido protege contra
+/// reentregas do mesmo webhook antes de qualquer pedido ser criado.
+model EventoIntegracao {
+  id                       Int                    @id @default(autoincrement())
+  plataforma               String
+  eventoId                 String                 @map("evento_id")
+  pedidoIdExterno          String                 @map("pedido_id_externo")
+  lojaIdExterno            String?                @map("loja_id_externo")
+  tipo                     String
+  payload                  Json
+  status                   StatusEventoIntegracao @default(pendente)
+  tentativas               Int                    @default(0)
+  proximaTentativaEm       DateTime               @default(now()) @map("proxima_tentativa_em")
+  processamentoIniciadoEm  DateTime?              @map("processamento_iniciado_em")
+  ultimoErro               String?                @map("ultimo_erro")
+  processadoEm             DateTime?              @map("processado_em")
+  pedidoId                 Int?                   @map("pedido_id")
+  pedido                   Pedido?                @relation(fields: [pedidoId], references: [id], onDelete: SetNull)
+  criadoEm                 DateTime               @default(now()) @map("criado_em")
+  atualizadoEm             DateTime               @updatedAt @map("atualizado_em")
+
+  @@unique([plataforma, eventoId])
+  @@unique([plataforma, pedidoIdExterno, tipo])
+  @@index([status, proximaTentativaEm])
 }
 
 model ItemPedido {

@@ -16,17 +16,22 @@ function ImagemProduto({ produto, tamanho }) {
 export default function App() {
   // 1. Os dados dos produtos (carregados da api-produtos quando a tela abre)
   const [produtos, setProdutos] = useState([]);
+  const [mapeamentos, setMapeamentos] = useState([]);
   const [erroProdutos, setErroProdutos] = useState(null);
   const [carregandoProdutos, setCarregandoProdutos] = useState(true);
 
   useEffect(() => {
-    fetch(`${PRODUTOS_API_URL}/produtos`)
-      .then(resposta => {
-        if (!resposta.ok) throw new Error(`Erro ${resposta.status}`);
-        return resposta.json();
+    const buscar = caminho => fetch(`${PRODUTOS_API_URL}${caminho}`).then(resposta => {
+      if (!resposta.ok) throw new Error(`Erro ${resposta.status}`);
+      return resposta.json();
+    });
+
+    Promise.all([buscar('/produtos'), buscar('/mapeamentos')])
+      .then(([lista, listaMapeamentos]) => {
+        // O preço vem como texto (Decimal no banco), então é convertido para número
+        setProdutos(lista.map(produto => ({ ...produto, preco: Number(produto.preco) })));
+        setMapeamentos(listaMapeamentos);
       })
-      // O preço vem como texto (Decimal no banco), então é convertido para número
-      .then(lista => setProdutos(lista.map(produto => ({ ...produto, preco: Number(produto.preco) }))))
       .catch(erro => setErroProdutos(erro.message))
       .finally(() => setCarregandoProdutos(false));
   }, []);
@@ -40,6 +45,22 @@ export default function App() {
   const [nome, setNome] = useState('');
   const [endereco, setEndereco] = useState('');
   const [enviando, setEnviando] = useState(false);
+
+  // Como uma plataforma real, o mock só conhece o código que o produto tem nela (MapeamentoApp),
+  // nunca o id interno do Gerencio. Produto sem mapeamento não existe no cardápio da plataforma.
+  const plataformaMapeamento = appSelecionado.replace(/\s/g, ''); // "uber eats" -> "ubereats"
+  const codigoExternoPorProduto = new Map(
+    mapeamentos
+      .filter(m => String(m.plataforma).toLowerCase() === plataformaMapeamento.toLowerCase())
+      .map(m => [m.produtoId, m.idExternoApp])
+  );
+  const produtosDaPlataforma = produtos.filter(produto => codigoExternoPorProduto.has(produto.id));
+
+  // Cada plataforma tem seu cardápio, então trocar de plataforma esvazia o carrinho
+  const trocarPlataforma = (plataforma) => {
+    setAppSelecionado(plataforma);
+    setCarrinho({});
+  };
 
   // 3. A Lógica Matemática
   const adicionarAoCarrinho = (id) => {
@@ -70,7 +91,7 @@ export default function App() {
     });
   };
 
-  const valorTotal = produtos.reduce((soma, produto) => {
+  const valorTotal = produtosDaPlataforma.reduce((soma, produto) => {
     const quantidade = carrinho[produto.id] || 0;
     return soma + (produto.preco * quantidade);
   }, 0);
@@ -90,14 +111,14 @@ export default function App() {
     if (valorTotal === 0) return alert("Seu carrinho está vazio!");
 
     // Cada pedido pertence a um único restaurante
-    const produtosNoCarrinho = produtos.filter(produto => carrinho[produto.id]);
+    const produtosNoCarrinho = produtosDaPlataforma.filter(produto => carrinho[produto.id]);
     const restaurantes = new Set(produtosNoCarrinho.map(produto => produto.restauranteId));
     if (restaurantes.size > 1) return alert("O carrinho tem produtos de mais de um restaurante. Faça um pedido por restaurante.");
     
     // Monta os itens do carrinho no formato da API (preços em centavos)
     const itens = produtosNoCarrinho
       .map(produto => ({
-        codigoExterno: produto.id,
+        codigoExterno: codigoExternoPorProduto.get(produto.id),
         nome: produto.nome,
         quantidade: carrinho[produto.id],
         precoUnitarioCentavos: Math.round(produto.preco * 100)
@@ -142,7 +163,7 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
             
             <label style={{ fontSize: '13px', color: '#ccc', marginBottom: '-10px' }}>Simular via Plataforma:</label>
-            <select value={appSelecionado} onChange={(e) => setAppSelecionado(e.target.value)} style={{ padding: '12px', borderRadius: '5px', backgroundColor: '#333', color: '#fff', border: tema.borda }}>
+            <select value={appSelecionado} onChange={(e) => trocarPlataforma(e.target.value)} style={{ padding: '12px', borderRadius: '5px', backgroundColor: '#333', color: '#fff', border: tema.borda }}>
               <option value="ifood">iFood</option>
               <option value="99 food">99 Food</option>
               <option value="uber eats">Uber Eats</option>
@@ -170,7 +191,8 @@ export default function App() {
             {erroProdutos && <p style={{ textAlign: 'center', color: '#e74c3c' }}>Não foi possível carregar o cardápio ({erroProdutos}). A api-produtos está rodando?</p>}
             {carregandoProdutos && <p style={{ textAlign: 'center', color: '#666' }}>Carregando cardápio...</p>}
             {!carregandoProdutos && !erroProdutos && produtos.length === 0 && <p style={{ textAlign: 'center', color: '#666' }}>Nenhum produto cadastrado.</p>}
-            {produtos.map((item) => (
+            {produtos.length > 0 && produtosDaPlataforma.length === 0 && <p style={{ textAlign: 'center', color: '#666' }}>Nenhum produto mapeado para esta plataforma. Cadastre o mapeamento na api-produtos.</p>}
+            {produtosDaPlataforma.map((item) => (
               <div key={item.id} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#2a2a2a', borderRadius: '8px', padding: '10px' }}>
                 
                 <ImagemProduto produto={item} tamanho={70} />
@@ -204,7 +226,7 @@ export default function App() {
           <h3 style={{ marginTop: 0, borderBottom: '1px solid #333', paddingBottom: '10px' }}>Itens Selecionados</h3>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
-            {produtos.map(item => {
+            {produtosDaPlataforma.map(item => {
               const qtd = carrinho[item.id];
               if (!qtd) return null;
 

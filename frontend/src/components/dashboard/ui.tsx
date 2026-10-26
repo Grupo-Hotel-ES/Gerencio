@@ -34,6 +34,10 @@ const ICONES = {
   info: { ios: 'info.circle', android: 'info', web: 'info' },
   baixar: { ios: 'arrow.down.to.line', android: 'download', web: 'download' },
   calendario: { ios: 'calendar', android: 'calendar_month', web: 'calendar_month' },
+  motoboy: { ios: 'bicycle', android: 'two_wheeler', web: 'two_wheeler' },
+  editar: { ios: 'pencil', android: 'edit', web: 'edit' },
+  fechar: { ios: 'xmark', android: 'close', web: 'close' },
+  usuario: { ios: 'person', android: 'person', web: 'person' },
 } as const satisfies Record<string, SymbolViewProps['name']>;
 
 export type NomeIcone = keyof typeof ICONES;

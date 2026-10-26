@@ -1,3 +1,6 @@
+allowBuilds:
+  # O ESLint usa o binário pré-compilado; não precisa executar o script de instalação.
+  unrs-resolver: false
 minimumReleaseAgeExclude:
   - '@expo/cli@57.0.19'
   - '@expo/inline-modules@0.1.7'

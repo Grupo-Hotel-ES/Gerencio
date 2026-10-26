@@ -11,6 +11,7 @@ const NAVEGACAO: { rotulo: string; icone: NomeIcone; href?: Href }[] = [
   { rotulo: 'Pedidos', icone: 'pedidos', href: '/' },
   { rotulo: 'Estoque', icone: 'estoque', href: '/estoque' },
   { rotulo: 'Relatórios', icone: 'relatorios', href: '/relatorios' },
+  { rotulo: 'Motoboys', icone: 'motoboy', href: '/motoboys' as Href },
   { rotulo: 'Rotas', icone: 'rotas' },
 ];
 
@@ -100,10 +101,10 @@ export function Sidebar() {
 
         <View style={styles.usuario}>
           <Texto tamanho={16} peso={500}>
-            Vila Bistrô
+            Gerôncio
           </Texto>
           <Texto tamanho={13} cor="textoSecundario">
-            Marina • Administradora
+            Painel local
           </Texto>
         </View>
       </View>

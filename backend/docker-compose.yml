@@ -78,5 +78,22 @@ services:
       <<: *api-env
       PORT: 3004
 
+  api-integracao:
+    <<: *api-common
+    container_name: geroncio-api-integracao
+    build:
+      context: .
+      dockerfile: ./api-integracao/Dockerfile
+    ports:
+      - "3005:3005"
+    environment:
+      <<: *api-env
+      PORT: 3005
+      # O mock das plataformas publica a 3333 no host; dentro do container, localhost não chega nele
+      IFOOD_API_URL: ${MOCK_API_URL:-http://host.docker.internal:3333}
+      MOCK_API_URL: ${MOCK_API_URL:-http://host.docker.internal:3333}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   geroncio_pgdata:
