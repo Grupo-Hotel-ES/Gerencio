@@ -3,9 +3,12 @@ import { db, parseId } from '@geroncio/shared-db'
 
 const routes = Router()
 
-// Listar todos os clientes
+// Listar todos os clientes (opcionalmente filtrando por telefone: ?telefone=5511999999999)
 routes.get('/clientes', async (req, res) => {
-  const clientes = await db.cliente.findMany()
+  const telefone = typeof req.query.telefone === 'string' ? req.query.telefone : undefined
+  const clientes = await db.cliente.findMany({
+    ...(telefone && { where: { telefone } }),
+  })
   res.json(clientes)
 })
 

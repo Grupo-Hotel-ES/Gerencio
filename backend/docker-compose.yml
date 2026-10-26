@@ -84,6 +84,32 @@ services:
     build:
       context: .
       dockerfile: ./api-integracao/Dockerfile
+      context: ./chatbot
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+      # O workflow lê estas variáveis com $env (ver chatbot/workflows/).
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:4b}
+      CHATBOT_RESTAURANTE_ID: ${CHATBOT_RESTAURANTE_ID:-1}
+    volumes:
+      - geroncio_n8ndata:/home/node/.n8n
+
+  # API do WhatsApp usada pelo chatbot. As tabelas dela ficam no schema
+  # "evolution" do mesmo Postgres, separadas do schema "public" do Prisma.
+  # DOCKER_ENV=true faz o entrypoint usar estas variáveis em vez de procurar
+  # um .env dentro do container.
+  evolution-api:
+    container_name: evolution_api
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "3005:3005"
     environment:
@@ -95,5 +121,31 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # LLM local do chatbot. O modelo vem de OLLAMA_MODEL e é baixado na primeira
+  # subida (fica no volume). O n8n acessa em http://llm:11434 (nó "Ollama").
+  # Para usar GPU NVIDIA, suba com o override docker-compose.gpu.yml.
+  llm:
+    container_name: geroncio-llm
+    restart: unless-stopped
+    build:
+      context: ./llm
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:4b}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-24h}
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-8192}
+    volumes:
+      - geroncio_ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama show \"$$OLLAMA_MODEL\" >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10m
+
 volumes:
   geroncio_pgdata:
+  geroncio_n8ndata:
+  evolution_instances:
+  geroncio_ollama:

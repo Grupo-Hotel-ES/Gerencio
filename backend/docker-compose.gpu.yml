@@ -1,0 +1,11 @@
+# Override para rodar o Ollama na GPU NVIDIA (precisa do nvidia-container-toolkit).
+# Uso: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+services:
+  llm:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

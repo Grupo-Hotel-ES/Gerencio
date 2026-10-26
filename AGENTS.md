@@ -23,6 +23,7 @@ O Gerôncio centraliza pedidos de várias plataformas de delivery (iFood, Rappi,
 │   ├── api-produtos/       # :3004  produtos e mapeamentos produto ↔ id externo da plataforma
 │   ├── api-integracao/     # :3005  webhooks/polling das plataformas de delivery
 │   ├── chatbot/            # :5678  n8n (workflows do chatbot)
+│   ├── llm/                # :11434 Ollama (LLM do chatbot)
 │   └── packages/shared-db/ # Prisma schema, migrations e cliente compartilhado
 ├── frontend/         # App React Native + Expo (expo-router), web e mobile
 ├── mock/             # Simulador das plataformas de delivery (API + banco + formulário web)
@@ -99,7 +100,18 @@ routes.get('/pedidos/:id', async (req, res) => {
 
 ### Chatbot (n8n)
 
-`chatbot/Dockerfile` estende a imagem oficial `n8nio/n8n` com a versão fixada em `ARG N8N_VERSION`. No compose, o serviço `chatbot` expõe o editor em http://localhost:5678 e guarda os dados (workflows, credenciais, chave de criptografia) no volume `geroncio_n8ndata`, usando o SQLite interno. Não aponte o n8n para o Postgres do Prisma: as tabelas dele quebrariam o `prisma migrate`. Dentro do compose, os workflows chamam as APIs pelo nome do serviço (`http://api-pedidos:3002/api`).
+`chatbot/Dockerfile` estende a imagem oficial `n8nio/n8n` com a versão fixada em `ARG N8N_VERSION`. No compose, o serviço `chatbot` expõe o editor em http://localhost:5678 e guarda os dados (workflows, credenciais, chave de criptografia) no volume `geroncio_n8ndata`, usando o SQLite interno. Não aponte o banco interno do n8n para o Postgres do Prisma: as tabelas dele quebrariam o `prisma migrate`. Dentro do compose, os workflows chamam as APIs pelo nome do serviço (`http://api-pedidos:3002/api`).
+
+A LLM do chatbot roda no serviço `llm` (`backend/llm/`, Ollama com a versão em `ARG OLLAMA_VERSION`), na porta 11434. O modelo é escolhido por `OLLAMA_MODEL` no `backend/.env` (padrão `qwen3.5:4b`) e baixado na subida do container para o volume `geroncio_ollama`; o healthcheck só fica `healthy` quando o modelo está pronto. Dentro do compose, a URL é `http://llm:11434`. Para usar GPU NVIDIA (precisa do `nvidia-container-toolkit`), suba com `pnpm docker:up:gpu` em `backend/`.
+
+O atendimento pelo WhatsApp é o workflow `chatbot/workflows/atendimento-whatsapp.json`. A Evolution API (instância `geroncio`, QR code em http://localhost:8080/manager) envia `MESSAGES_UPSERT` para `http://chatbot:5678/webhook/whatsapp`, e o workflow funciona como orquestrador:
+
+- **Debounce**: cada mensagem entra em `MensagemChatbot`, e depois de 4 s só a execução da mensagem mais recente do telefone segue, com todas as mensagens pendentes juntas.
+- **Sessão**: histórico, cliente, pedido pendente e último pedido ficam em `SessaoChatbot` (Prisma), lidos e gravados pelo nó Postgres.
+- **Loop**: a LLM responde sempre um JSON `{ "acao", "dados" }`, restrito pelo `format` do Ollama. O orquestrador executa a ação, devolve o resultado como mensagem `--- RESULTADO <AÇÃO> ---` e chama a LLM de novo, até `MENSAGEM` (que envia pelo WhatsApp e encerra) ou até 6 passos.
+- **Ações**: `MENSAGEM`, `CARDAPIO`, `RESUMIR_PEDIDO` (valida ids e calcula o total com os preços do banco), `CONFIRMAR_PEDIDO` (só depois de o cliente responder ao resumo) e `CONSULTAR_PEDIDO` (só pedidos do próprio cliente). Para criar uma ação, inclua-a no `enum` e nas instruções de "Preparar chamada" e numa saída do Switch "Ação".
+
+O restaurante atendido vem de `CHATBOT_RESTAURANTE_ID` (padrão 1). Depois de editar o JSON (ou exportá-lo do editor), rode `sh chatbot/importar-workflow.sh` em `backend/`: o script cria as credenciais (Postgres e Evolution, a partir do `.env`), importa, publica e reinicia o n8n.
 
 ### Integração com plataformas
 

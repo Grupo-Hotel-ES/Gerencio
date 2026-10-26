@@ -1,0 +1,1233 @@
+{
+  "id": "geroncioWhatsApp",
+  "name": "Chatbot - Atendimento WhatsApp",
+  "nodes": [
+    {
+      "id": "476a901a-e857-4457-a79a-001fa80d7a90",
+      "name": "Mensagem recebida",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp",
+        "options": {}
+      },
+      "webhookId": "5dac6567-1235-454f-95a2-6ae6ff8cfa63"
+    },
+    {
+      "id": "711f1250-2812-4fd1-a5f7-d74eaf5564b3",
+      "name": "Extrair mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Normaliza o evento messages.upsert da Evolution API\nconst corpo = $input.first().json.body ?? {}\nconst dados = corpo.data ?? {}\nconst chave = dados.key ?? {}\nconst jid = chave.remoteJid ?? ''\nconst mensagem = dados.message ?? {}\nconst texto = (mensagem.conversation ?? mensagem.extendedTextMessage?.text ?? '').trim()\n\n// motivo = null quando a mensagem deve ser respondida pela LLM\nlet motivo = null\nif (corpo.event !== 'messages.upsert') motivo = 'evento'\nelse if (chave.fromMe) motivo = 'propria'\nelse if (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@lid')) motivo = 'grupo'\nelse if (!texto) motivo = 'midia'\n\n// Em contas com LID, o remoteJid não é o número: ele vem em remoteJidAlt (ou senderPn)\nconst jidTelefone = [jid, chave.remoteJidAlt, chave.senderPn].find((j) => j?.endsWith('@s.whatsapp.net'))\nconst numero = (jidTelefone ?? jid).split('@')[0]\n\nreturn [{\n  json: {\n    motivo,\n    instancia: corpo.instance,\n    jid: jidTelefone ?? jid,\n    telefone: numero,\n    mensagemId: chave.id,\n    texto,\n    nomeWhatsApp: dados.pushName ?? null,\n  },\n}]\n"
+      }
+    },
+    {
+      "id": "29a0b63f-df9f-4980-a117-c3b43cec2da4",
+      "name": "Tipo de mensagem",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e462b4b0-344c-4ffb-9879-2a42b28cc5d0",
+                    "leftValue": "={{ $json.motivo ?? \"texto\" }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "texto"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "texto"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "6127b3a8-66f0-4d4f-a3cc-829c85a80d7c",
+                    "leftValue": "={{ $json.motivo }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "midia"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "midia"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "87ceab66-5149-4ea3-a389-52bb55d5f3ad",
+      "name": "Avisar só texto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://evolution-api:8080/message/sendText/{{ $json.instancia }}",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.jid, text: \"Por enquanto só consigo ler mensagens de texto 🙂\" }) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "geroncioEvoApi01",
+          "name": "Evolution API"
+        }
+      }
+    },
+    {
+      "id": "11a3a21e-bfbb-4bc9-bcd9-5475815099e6",
+      "name": "Registrar mensagem",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO \"MensagemChatbot\" (telefone, mensagem_id, texto)\nVALUES ($1, $2, $3)\nON CONFLICT (mensagem_id) DO NOTHING\nRETURNING id",
+        "options": {
+          "queryReplacement": "={{ [$json.telefone, $json.mensagemId, $json.texto] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "geroncioPostgres",
+          "name": "Postgres Gerôncio"
+        }
+      }
+    },
+    {
+      "id": "537ed2a2-b63a-4d72-8e9f-3f2c58ef09f8",
+      "name": "Mensagem nova?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cfb2ffc6-3f58-43a5-8573-446dddc7236f",
+              "leftValue": "={{ $json.id }}",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "409a9f10-e0f5-44dc-9bae-606d2ba544e8",
+      "name": "Aguardar mais mensagens",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "amount": 4,
+        "unit": "seconds"
+      },
+      "webhookId": "687aff77-785e-4fa4-9f14-934e5ecfabd7"
+    },
+    {
+      "id": "4f87ca46-72e2-4df0-a0e7-822810a5b97c",
+      "name": "Agrupar mensagens",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM \"MensagemChatbot\"\nWHERE telefone = $1\n  AND (SELECT max(id) FROM \"MensagemChatbot\" WHERE telefone = $1) = $2\nRETURNING id, texto",
+        "options": {
+          "queryReplacement": "={{ [$('Extrair mensagem').first().json.telefone, $json.id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "geroncioPostgres",
+          "name": "Postgres Gerôncio"
+        }
+      }
+    },
+    {
+      "id": "54b8f73c-5a36-4d1f-bd16-9d88f2b37291",
+      "name": "É a mais recente?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f763cba6-40c4-42a3-bbf9-771b2652157c",
+              "leftValue": "={{ $json.id }}",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b15006ff-d661-491e-ab22-9cd1f60a4da3",
+      "name": "Carregar sessão",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1760,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM \"SessaoChatbot\" WHERE telefone = $1",
+        "options": {
+          "queryReplacement": "={{ [$('Extrair mensagem').first().json.telefone] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "geroncioPostgres",
+          "name": "Postgres Gerôncio"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "3d8cbc33-9ab4-435b-9e8d-5a2be0a326c1",
+      "name": "Buscar cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://api-clientes:3001/api/clientes?telefone={{ $('Extrair mensagem').first().json.telefone }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "b2eca58d-028f-4e60-9e36-17c8db27f323",
+      "name": "Buscar restaurante",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://api-restaurantes:3003/api/restaurantes/{{ $env.CHATBOT_RESTAURANTE_ID || 1 }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "b236bdda-966b-46d7-9019-738f19fb51cd",
+      "name": "Montar contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const mensagem = $('Extrair mensagem').first().json\nconst sessao = $('Carregar sessão').first().json\nconst cliente = $('Buscar cliente').first().json\nconst restaurante = $('Buscar restaurante').first().json\n\n// Mensagens agrupadas pelo debounce, na ordem em que chegaram\nconst textos = $('Agrupar mensagens').all()\n  .map((item) => item.json)\n  .sort((a, b) => a.id - b.id)\n  .map((m) => m.texto)\n\nconst historico = Array.isArray(sessao.historico) ? sessao.historico : []\nhistorico.push({ role: 'user', content: textos.join('\\n') })\n\n// O cliente respondeu depois do resumo, então o pedido pendente já pode ser confirmado\nconst pedidoPendente = sessao.pedido_pendente ?? null\nif (pedidoPendente) pedidoPendente.confirmavel = true\n\nreturn [{\n  json: {\n    telefone: mensagem.telefone,\n    jid: mensagem.jid,\n    instancia: mensagem.instancia,\n    nomeWhatsApp: mensagem.nomeWhatsApp,\n    restauranteId: restaurante.id ?? Number($env.CHATBOT_RESTAURANTE_ID || 1),\n    restauranteNome: restaurante.nome ?? 'Gerôncio',\n    clienteId: cliente.id ?? sessao.cliente_id ?? null,\n    nomeCliente: cliente.nomeCliente ?? mensagem.nomeWhatsApp,\n    ultimoPedidoId: sessao.ultimo_pedido_id ?? null,\n    pedidoPendente,\n    historico,\n    passo: 0,\n    falhas: 0,\n  },\n}]\n"
+      }
+    },
+    {
+      "id": "513d3032-fc29-43c2-90eb-76cb8bc99f4c",
+      "name": "Preparar chamada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Monta a requisição para o Ollama: instruções + histórico da conversa.\n// O campo format restringe a resposta ao JSON { acao, dados }.\nconst estado = $input.first().json\n\nconst FORMATO = {\n  type: 'object',\n  properties: {\n    acao: {\n      type: 'string',\n      enum: ['MENSAGEM', 'CARDAPIO', 'RESUMIR_PEDIDO', 'CONFIRMAR_PEDIDO', 'CONSULTAR_PEDIDO'],\n    },\n    dados: {\n      type: 'object',\n      properties: {\n        texto: { type: 'string' },\n        itens: {\n          type: 'array',\n          items: {\n            type: 'object',\n            properties: { produtoId: { type: 'integer' }, quantidade: { type: 'integer' } },\n            required: ['produtoId', 'quantidade'],\n          },\n        },\n        endereco: { type: 'string' },\n        cep: { type: 'string' },\n        pagamento: { type: 'string', enum: ['dinheiro', 'pix', 'cartao'] },\n        pedidoId: { type: 'integer' },\n      },\n    },\n  },\n  required: ['acao', 'dados'],\n}\n\nconst real = (valor) => `R$ ${Number(valor).toFixed(2).replace('.', ',')}`\nconst pendente = estado.pedidoPendente\n  ? estado.pedidoPendente.itens.map((i) => `${i.quantidade}x ${i.nome}`).join(', ') +\n    ` (total ${real(estado.pedidoPendente.total)})`\n  : 'nenhum'\n\nconst instrucoes = `Você é o atendente virtual do restaurante ${estado.restauranteNome} no WhatsApp. Atenda os clientes em português do Brasil, com mensagens curtas, simpáticas e informais.\n\nVocê não fala direto com o cliente: cada resposta sua é um JSON com UMA ação, que o sistema executa. Responda sempre no formato {\"acao\": \"...\", \"dados\": {...}}.\n\nAÇÕES\n- MENSAGEM: envia dados.texto ao cliente pelo WhatsApp e encerra a sua vez. Use para responder, perguntar ou pedir confirmação.\n  Exemplo: {\"acao\": \"MENSAGEM\", \"dados\": {\"texto\": \"Oi! Quer ver o cardápio?\"}}\n- CARDAPIO: consulta os produtos e preços atuais.\n  Exemplo: {\"acao\": \"CARDAPIO\", \"dados\": {}}\n- RESUMIR_PEDIDO: monta o pedido e calcula o total. Precisa dos itens (produtoId do cardápio e quantidade), endereço, CEP e forma de pagamento (dinheiro, pix ou cartao, sempre paga na entrega). Depois mostre o resumo ao cliente com MENSAGEM e pergunte se pode confirmar.\n  Exemplo: {\"acao\": \"RESUMIR_PEDIDO\", \"dados\": {\"itens\": [{\"produtoId\": 1, \"quantidade\": 2}], \"endereco\": \"Rua das Flores, 10\", \"cep\": \"12345-000\", \"pagamento\": \"pix\"}}\n- CONFIRMAR_PEDIDO: cria o pedido que foi resumido. Só use depois que o cliente disser que confirma o resumo.\n  Exemplo: {\"acao\": \"CONFIRMAR_PEDIDO\", \"dados\": {}}\n- CONSULTAR_PEDIDO: consulta o status de um pedido do cliente. dados.pedidoId é opcional; sem ele, consulta o último pedido.\n  Exemplo: {\"acao\": \"CONSULTAR_PEDIDO\", \"dados\": {}}\n\nO resultado de cada ação volta para você numa mensagem que começa com \"--- RESULTADO <AÇÃO> ---\". Essas mensagens vêm do sistema, não do cliente: o cliente não as vê.\n\nREGRAS\n- Você NÃO sabe o que o restaurante vende até usar CARDAPIO. Se o cliente perguntar o que tem, pedir o cardápio, perguntar preço ou quiser fazer um pedido, use CARDAPIO primeiro e só então responda com MENSAGEM, citando os itens e preços exatamente como vieram.\n- Nunca invente produtos, preços, prazos ou status. Repasse o status do pedido exatamente como veio.\n- Não presuma dados que o cliente não informou (como a forma de pagamento): pergunte.\n- Use apenas produtoId que apareceram no cardápio.\n- Se faltar alguma informação do pedido, pergunte ao cliente com MENSAGEM.\n- Se uma ação devolver erro, corrija e tente de novo, ou explique o problema ao cliente.\n- Para assuntos que não sejam do restaurante, diga com educação que só pode ajudar com pedidos.\n\nCONTEXTO\n- Agora: ${$now.setZone('America/Sao_Paulo').toFormat('dd/MM/yyyy HH:mm')}\n- Nome do cliente: ${estado.nomeCliente ?? 'desconhecido'}\n- Pedido aguardando confirmação: ${pendente}\n- Último pedido: ${estado.ultimoPedidoId ? '#' + estado.ultimoPedidoId : 'nenhum'}`\n\nreturn [{\n  json: {\n    ...estado,\n    requisicao: {\n      model: $env.OLLAMA_MODEL,\n      stream: false,\n      think: false,\n      format: FORMATO,\n      options: { temperature: 0.3 },\n      messages: [{ role: 'system', content: instrucoes }, ...estado.historico],\n    },\n  },\n}]\n"
+      }
+    },
+    {
+      "id": "0c2f290f-6688-40af-b51b-52af805ad0e5",
+      "name": "Chamar LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://llm:11434/api/chat",
+        "options": {
+          "timeout": 300000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.requisicao) }}"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "22fca3df-23c3-40e2-96f2-3c9bf032d3bf",
+      "name": "Interpretar ação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Lê a ação escolhida pela LLM e decide o próximo passo do orquestrador\nconst LIMITE_PASSOS = 6\nconst DESCULPA = 'Desculpe, tive um problema aqui. Pode repetir, por favor?'\n\nconst estado = { ...$('Preparar chamada').first().json }\ndelete estado.requisicao\nestado.passo += 1\n\nlet resposta = null\ntry {\n  resposta = JSON.parse($input.first().json.message?.content ?? '')\n} catch (erro) {\n  resposta = null\n}\n\nconst valida = resposta && typeof resposta.acao === 'string' && typeof resposta.dados === 'object' &&\n  (resposta.acao !== 'MENSAGEM' || (resposta.dados.texto ?? '').trim() !== '')\n\nif (!valida) {\n  estado.falhas += 1\n  if (estado.falhas > 1 || estado.passo >= LIMITE_PASSOS) {\n    return [{ json: { ...estado, acao: 'MENSAGEM', dados: { texto: DESCULPA } } }]\n  }\n  estado.historico.push({\n    role: 'user',\n    content: '--- ERRO ---\\nResposta inválida. Responda apenas com o JSON {\"acao\": \"...\", \"dados\": {...}}.',\n  })\n  return [{ json: { ...estado, acao: 'REPETIR', dados: {} } }]\n}\n\nestado.historico.push({ role: 'assistant', content: JSON.stringify(resposta) })\n\n// Limite de passos: encerra a vez com uma mensagem em vez de seguir chamando ações\nif (estado.passo >= LIMITE_PASSOS && resposta.acao !== 'MENSAGEM') {\n  return [{ json: { ...estado, acao: 'MENSAGEM', dados: { texto: DESCULPA } } }]\n}\n\nreturn [{ json: { ...estado, acao: resposta.acao, dados: resposta.dados } }]\n"
+      }
+    },
+    {
+      "id": "7b3cda24-6e9a-4678-94f1-17e8ef776932",
+      "name": "Ação",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        3300,
+        300
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "2829bce3-b57b-4874-a60e-c2304702fcc0",
+                    "leftValue": "={{ $json.acao }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "MENSAGEM"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "MENSAGEM"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "28da3e09-7ba3-429a-8e06-f0da02692984",
+                    "leftValue": "={{ $json.acao }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "CARDAPIO"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CARDAPIO"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "d742c4c9-c6d1-4bc1-b70f-782250c2153e",
+                    "leftValue": "={{ $json.acao }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "RESUMIR_PEDIDO"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "RESUMIR_PEDIDO"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e389080b-8692-4db8-b761-e3c47a70e23b",
+                    "leftValue": "={{ $json.acao }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "CONFIRMAR_PEDIDO"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CONFIRMAR_PEDIDO"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "da5ef069-9eeb-40cb-a2d1-cac32b863778",
+                    "leftValue": "={{ $json.acao }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "CONSULTAR_PEDIDO"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CONSULTAR_PEDIDO"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "de6501ba-f5ab-4713-b2b9-58eca4481958",
+                    "leftValue": "={{ $json.acao }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "REPETIR"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "REPETIR"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "25262817-5830-456b-ba2b-b6e965caa422",
+      "name": "Registrar resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        900
+      ],
+      "parameters": {
+        "jsCode": "// Devolve o resultado da ação para a LLM como uma mensagem do sistema\nconst estado = { ...$input.first().json }\nestado.historico = [\n  ...estado.historico,\n  { role: 'user', content: `--- RESULTADO ${estado.acao} ---\\n${estado.resultado}` },\n]\ndelete estado.resultado\ndelete estado.acao\ndelete estado.dados\nreturn [{ json: estado }]\n"
+      }
+    },
+    {
+      "id": "3d39e57d-a41d-4dee-9b8d-ef685b6e0cec",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://evolution-api:8080/message/sendText/{{ $json.instancia }}",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.jid, text: $json.dados.texto }) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "geroncioEvoApi01",
+          "name": "Evolution API"
+        }
+      }
+    },
+    {
+      "id": "12a0e02e-0cc9-423a-9d28-547f35b120eb",
+      "name": "Salvar sessão",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3740,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO \"SessaoChatbot\" (telefone, historico, cliente_id, pedido_pendente, ultimo_pedido_id, atualizado_em)\nVALUES ($1, $2::jsonb, $3, $4::jsonb, $5, now())\nON CONFLICT (telefone) DO UPDATE SET\n  historico = EXCLUDED.historico,\n  cliente_id = EXCLUDED.cliente_id,\n  pedido_pendente = EXCLUDED.pedido_pendente,\n  ultimo_pedido_id = EXCLUDED.ultimo_pedido_id,\n  atualizado_em = now()",
+        "options": {
+          "queryReplacement": "={{ (e => [e.telefone, JSON.stringify(e.historico.slice(-30)), e.clienteId ?? null, e.pedidoPendente ? JSON.stringify(e.pedidoPendente) : null, e.ultimoPedidoId ?? null])($('Interpretar ação').first().json) }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "geroncioPostgres",
+          "name": "Postgres Gerôncio"
+        }
+      }
+    },
+    {
+      "id": "a5d7f2e9-2efb-413c-b8c1-e1d97fd69fbe",
+      "name": "Buscar cardápio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://api-restaurantes:3003/api/restaurantes/{{ $json.restauranteId }}/produtos",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "3c9ee46e-56ff-4f60-927f-bb9bed12ef84",
+      "name": "Formatar cardápio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const estado = $('Interpretar ação').first().json\nconst produtos = $input.all().map((item) => item.json).filter((p) => p.id)\nconst real = (valor) => `R$ ${Number(valor).toFixed(2).replace('.', ',')}`\n\nconst resultado = produtos.length\n  ? 'produtoId | nome | preço\\n' + produtos.map((p) => `${p.id} | ${p.nome} | ${real(p.preco)}`).join('\\n')\n  : 'O cardápio está vazio ou indisponível no momento.'\n\nreturn [{ json: { ...estado, resultado } }]\n"
+      }
+    },
+    {
+      "id": "20ef8cf2-f029-47e9-b66f-8152fbdbb520",
+      "name": "Buscar preços",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        400
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://api-restaurantes:3003/api/restaurantes/{{ $json.restauranteId }}/produtos",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "dc6e0774-4a47-4445-b33d-9b49919caf82",
+      "name": "Calcular resumo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        400
+      ],
+      "parameters": {
+        "jsCode": "// Valida o pedido proposto pela LLM e calcula o total com os preços do banco\nconst estado = { ...$('Interpretar ação').first().json }\nconst { itens = [], endereco = '', cep = '', pagamento = '' } = estado.dados\nconst produtos = new Map($input.all().map((item) => item.json).filter((p) => p.id).map((p) => [p.id, p]))\nconst real = (valor) => `R$ ${Number(valor).toFixed(2).replace('.', ',')}`\n\nconst erros = []\nconst quantidades = new Map()\nfor (const item of itens) {\n  const id = Number(item.produtoId)\n  const quantidade = Number(item.quantidade)\n  if (!produtos.has(id)) erros.push(`produtoId ${item.produtoId} não existe no cardápio`)\n  else if (!Number.isInteger(quantidade) || quantidade < 1) erros.push(`quantidade inválida para o produtoId ${id}`)\n  else quantidades.set(id, (quantidades.get(id) ?? 0) + quantidade)\n}\nif (itens.length === 0) erros.push('nenhum item informado')\nif (!endereco.trim()) erros.push('endereço não informado')\nif (cep.replace(/\\D/g, '').length !== 8) erros.push('CEP inválido (precisa ter 8 dígitos)')\nif (!['dinheiro', 'pix', 'cartao'].includes(pagamento)) erros.push('forma de pagamento deve ser dinheiro, pix ou cartao')\n\nif (erros.length) {\n  return [{ json: { ...estado, resultado: `Erro: não foi possível montar o pedido: ${erros.join('; ')}.` } }]\n}\n\nconst linhas = [...quantidades].map(([id, quantidade]) => ({\n  produtoId: id,\n  nome: produtos.get(id).nome,\n  quantidade,\n  precoUnitario: Number(produtos.get(id).preco),\n}))\nconst total = linhas.reduce((soma, l) => soma + l.precoUnitario * l.quantidade, 0)\n\n// confirmavel vira true quando o cliente responder (ver \"Montar contexto\")\nestado.pedidoPendente = { itens: linhas, endereco: endereco.trim(), cep, pagamento, total, confirmavel: false }\n\nconst resultado = [\n  'Pedido montado (ainda NÃO confirmado):',\n  ...linhas.map((l) => `- ${l.quantidade}x ${l.nome} (${real(l.precoUnitario)} cada)`),\n  `Total: ${real(total)}`,\n  `Entrega: ${endereco.trim()}, CEP ${cep}`,\n  `Pagamento na entrega: ${pagamento}`,\n  'Mostre este resumo ao cliente com MENSAGEM e pergunte se pode confirmar.',\n].join('\\n')\n\nreturn [{ json: { ...estado, resultado } }]\n"
+      }
+    },
+    {
+      "id": "364c2c20-f9da-4701-9432-afc35f7312f9",
+      "name": "Validar confirmação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        600
+      ],
+      "parameters": {
+        "jsCode": "const estado = { ...$('Interpretar ação').first().json }\nconst pendente = estado.pedidoPendente\n\nlet erro = null\nif (!pendente) erro = 'Erro: não há pedido montado. Use RESUMIR_PEDIDO antes.'\nelse if (!pendente.confirmavel) {\n  erro = 'Erro: o cliente ainda não viu o resumo. Mostre o resumo com MENSAGEM e espere ele confirmar.'\n}\n\nif (erro) return [{ json: { ...estado, ok: false, resultado: erro } }]\n\nreturn [{\n  json: {\n    ...estado,\n    ok: true,\n    corpoPedido: {\n      nomeCliente: estado.nomeCliente,\n      preco: pendente.total,\n      metodoPagamento: pendente.pagamento,\n      app: 'whatsapp',\n      enderecoDestino: pendente.endereco,\n      cepDestino: pendente.cep,\n      itens: pendente.itens.map((i) => ({ produtoId: i.produtoId, quantidade: i.quantidade })),\n    },\n  },\n}]\n"
+      }
+    },
+    {
+      "id": "c6f2ab0b-1367-4d3c-bdac-c9d73d173073",
+      "name": "Pode confirmar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3740,
+        600
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1b10dc45-b452-43ba-a35f-bf9abb6156a8",
+              "leftValue": "={{ $json.ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "17056f73-637f-4e26-ba66-d9efa3a348c0",
+      "name": "Cliente cadastrado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3960,
+        560
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "92cf92fb-e3c7-4f23-931f-4caa5a3145c1",
+              "leftValue": "={{ $json.clienteId }}",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "15758e96-da93-4ab6-af45-f6b074bd891c",
+      "name": "Cadastrar cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4180,
+        660
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://api-clientes:3001/api/clientes",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ nomeCliente: $json.nomeCliente ?? \"Cliente WhatsApp\", endereco: $json.pedidoPendente.endereco, telefone: $json.telefone }) }}"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "c5694c7d-bac2-46a2-b044-2d40651b8d12",
+      "name": "Criar pedido",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4400,
+        560
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://api-pedidos:3002/api/pedidos",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ...$('Validar confirmação').first().json.corpoPedido, clienteId: $('Validar confirmação').first().json.clienteId ?? $json.id ?? null }) }}"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a44119fa-4da1-4a1d-b296-d9988f829bf8",
+      "name": "Resultado do pedido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        560
+      ],
+      "parameters": {
+        "jsCode": "const estado = { ...$('Validar confirmação').first().json }\nconst pedido = $input.first().json\ndelete estado.ok\ndelete estado.corpoPedido\n\nif (!pedido.id) {\n  const detalhe = pedido.error?.message ?? pedido.error ?? 'erro desconhecido'\n  return [{ json: { ...estado, resultado: `Erro ao criar o pedido: ${detalhe}. Peça desculpas ao cliente.` } }]\n}\n\nestado.clienteId = pedido.clienteId ?? estado.clienteId\nestado.ultimoPedidoId = pedido.id\nestado.pedidoPendente = null\n\nreturn [{\n  json: {\n    ...estado,\n    resultado: `Pedido #${pedido.id} criado com sucesso e recebido pelo restaurante. Avise o cliente com o número do pedido.`,\n  },\n}]\n"
+      }
+    },
+    {
+      "id": "ccb9edf5-0ae1-4528-9df9-4161db8c2cbc",
+      "name": "Buscar pedidos do cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        800
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://api-pedidos:3002/api/pedidos?clienteId={{ $json.clienteId ?? 0 }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "6f24fade-dfdc-49f7-b29c-ce53e3ac7671",
+      "name": "Resumir status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        800
+      ],
+      "parameters": {
+        "jsCode": "const estado = $('Interpretar ação').first().json\nconst pedidos = $input.all().map((item) => item.json).filter((p) => p.id)\nconst real = (valor) => `R$ ${Number(valor).toFixed(2).replace('.', ',')}`\nconst STATUS = {\n  novo: 'recebido, aguardando o restaurante começar o preparo',\n  em_preparo: 'em preparo',\n  pronto: 'pronto, aguardando o entregador',\n  saiu_para_entrega: 'saiu para entrega',\n  entregue: 'entregue',\n  cancelado: 'cancelado',\n}\n\nconst pedidoId = estado.dados.pedidoId ?? estado.ultimoPedidoId\nconst pedido = pedidoId ? pedidos.find((p) => p.id === Number(pedidoId)) : pedidos[0]\n\nlet resultado\nif (!pedidos.length) resultado = 'Este cliente ainda não tem pedidos.'\nelse if (!pedido) resultado = `Erro: o pedido #${pedidoId} não existe ou não é deste cliente.`\nelse {\n  const itens = pedido.itens.map((i) => `${i.quantidade}x ${i.produto?.nome ?? 'item'}`).join(', ')\n  const feitoEm = DateTime.fromISO(pedido.criadoEm).setZone('America/Sao_Paulo').toFormat('dd/MM HH:mm')\n  resultado = `Pedido #${pedido.id} (feito em ${feitoEm}): ${STATUS[pedido.status] ?? pedido.status}. Itens: ${itens}. Total: ${real(pedido.preco)}.`\n}\n\nreturn [{ json: { ...estado, resultado } }]\n"
+      }
+    }
+  ],
+  "connections": {
+    "Mensagem recebida": {
+      "main": [
+        [
+          {
+            "node": "Extrair mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair mensagem": {
+      "main": [
+        [
+          {
+            "node": "Tipo de mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tipo de mensagem": {
+      "main": [
+        [
+          {
+            "node": "Registrar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avisar só texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Mensagem nova?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem nova?": {
+      "main": [
+        [
+          {
+            "node": "Aguardar mais mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar mais mensagens": {
+      "main": [
+        [
+          {
+            "node": "Agrupar mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agrupar mensagens": {
+      "main": [
+        [
+          {
+            "node": "É a mais recente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "É a mais recente?": {
+      "main": [
+        [
+          {
+            "node": "Carregar sessão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carregar sessão": {
+      "main": [
+        [
+          {
+            "node": "Buscar cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar cliente": {
+      "main": [
+        [
+          {
+            "node": "Buscar restaurante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar restaurante": {
+      "main": [
+        [
+          {
+            "node": "Montar contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar contexto": {
+      "main": [
+        [
+          {
+            "node": "Preparar chamada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar chamada": {
+      "main": [
+        [
+          {
+            "node": "Chamar LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chamar LLM": {
+      "main": [
+        [
+          {
+            "node": "Interpretar ação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpretar ação": {
+      "main": [
+        [
+          {
+            "node": "Ação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar resultado": {
+      "main": [
+        [
+          {
+            "node": "Preparar chamada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ação": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Buscar cardápio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Buscar preços",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Validar confirmação",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Buscar pedidos do cliente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar chamada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Salvar sessão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar cardápio": {
+      "main": [
+        [
+          {
+            "node": "Formatar cardápio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatar cardápio": {
+      "main": [
+        [
+          {
+            "node": "Registrar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar preços": {
+      "main": [
+        [
+          {
+            "node": "Calcular resumo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular resumo": {
+      "main": [
+        [
+          {
+            "node": "Registrar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar confirmação": {
+      "main": [
+        [
+          {
+            "node": "Pode confirmar?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pode confirmar?": {
+      "main": [
+        [
+          {
+            "node": "Cliente cadastrado?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cliente cadastrado?": {
+      "main": [
+        [
+          {
+            "node": "Criar pedido",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cadastrar cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cadastrar cliente": {
+      "main": [
+        [
+          {
+            "node": "Criar pedido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar pedido": {
+      "main": [
+        [
+          {
+            "node": "Resultado do pedido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resultado do pedido": {
+      "main": [
+        [
+          {
+            "node": "Registrar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar pedidos do cliente": {
+      "main": [
+        [
+          {
+            "node": "Resumir status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resumir status": {
+      "main": [
+        [
+          {
+            "node": "Registrar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}
