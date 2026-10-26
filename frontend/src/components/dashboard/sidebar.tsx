@@ -4,15 +4,15 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Divisor, Icone, Texto, type NomeIcone } from './ui';
 
 import { Espacamento, Raio } from '@/constants/tokens';
+import { usePerfil } from '@/data/perfil-context';
 import { useCores } from '@/hooks/use-cores';
 
-// A página de Rotas ainda não foi implementada, por isso não tem `href`.
 const NAVEGACAO: { rotulo: string; icone: NomeIcone; href?: Href }[] = [
   { rotulo: 'Pedidos', icone: 'pedidos', href: '/' },
   { rotulo: 'Estoque', icone: 'estoque', href: '/estoque' },
   { rotulo: 'Relatórios', icone: 'relatorios', href: '/relatorios' },
-  { rotulo: 'Motoboys', icone: 'motoboy', href: '/motoboys' as Href },
-  { rotulo: 'Rotas', icone: 'rotas' },
+  { rotulo: 'Rotas', icone: 'rotas', href: '/rotas' },
+  { rotulo: 'Configurações', icone: 'configuracoes', href: '/configuracoes' },
 ];
 
 function ItensNavegacao() {
@@ -58,6 +58,7 @@ export function NavegacaoCompacta() {
 
 export function Sidebar() {
   const cores = useCores();
+  const { perfil } = usePerfil();
 
   return (
     <View style={[styles.container, { backgroundColor: cores.superficie, borderColor: cores.borda }]}>
@@ -104,14 +105,16 @@ export function Sidebar() {
 
           <Divisor />
 
-          <View style={styles.usuario}>
-            <Texto tamanho={16} peso={500}>
-              Vila Bistrô
-            </Texto>
-            <Texto tamanho={13} cor="textoSecundario">
-              Marina • Administradora
-            </Texto>
-          </View>
+          <Link href="/perfil" asChild>
+            <Pressable style={styles.usuario}>
+              <Texto tamanho={16} peso={500}>
+                {perfil.nomeRestaurante}
+              </Texto>
+              <Texto tamanho={13} cor="textoSecundario">
+                {perfil.nomeCompleto.split(' ')[0]} • {perfil.cargo}
+              </Texto>
+            </Pressable>
+          </Link>
         </View>
       </ScrollView>
     </View>
