@@ -166,6 +166,28 @@ Content-Type: application/json
 # o status de "pronto" → "saiu_para_entrega" → "entregue".
 # ------------------------------------------------------------------
 
+### 4.0.1. Avançar pedido para "em_preparo" (motoboy saiu com o pedido)
+# Resposta esperada: 200 OK — pedido com status "saiu_para_entrega"
+PATCH {{urlBase}}/pedidos/1/status
+Content-Type: application/json
+
+{
+  "status": "em_preparo"
+}
+
+###
+
+### 4.0.2. Avançar pedido para "em_preparo" (motoboy saiu com o pedido)
+# Resposta esperada: 200 OK — pedido com status "saiu_para_entrega"
+PATCH {{urlBase}}/pedidos/1/status
+Content-Type: application/json
+
+{
+  "status": "pronto"
+}
+
+###
+
 ### 4.1. Avançar pedido para "saiu_para_entrega" (motoboy saiu com o pedido)
 # Resposta esperada: 200 OK — pedido com status "saiu_para_entrega"
 PATCH {{urlBase}}/pedidos/1/status
@@ -363,3 +385,4 @@ GET {{urlBase}}/relatorios/vendas?inicio=2025-01-01&fim=2026-12-31
 GET {{urlBase}}/relatorios/vendas?inicio=2026-10-01&fim=2026-10-26&restauranteId=xyz
 
 ###
+
