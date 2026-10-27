@@ -38,17 +38,23 @@ enum StatusEventoIntegracao {
 }
 
 model Restaurante {
-  id          Int                    @id @default(autoincrement())
-  cnpj        String                 @unique
-  nome        String
-  email       String
-  telefone    String
-  cep         String
-  cidade      String
-  endereco    String
-  credenciais CredencialPlataforma[]
-  vinculos    VinculoFuncionario[]
-  produtos    Produto[]
+  id                  Int                    @id @default(autoincrement())
+  cnpj                String                 @unique
+  nome                String
+  email               String
+  telefone            String
+  cep                 String
+  cidade              String
+  endereco            String
+  latitude            Float?
+  longitude           Float?
+  taxaEntregaBase     Decimal                @default(6.00) @map("taxa_entrega_base") @db.Decimal(10, 2)
+  kmInclusosTaxaBase  Float                  @default(1.0) @map("km_inclusos_taxa_base")
+  custoPorKmAdicional Decimal                @default(1.15) @map("custo_por_km_adicional") @db.Decimal(10, 2)
+  distanciaMaximaKm   Float?                 @map("distancia_maxima_km")
+  credenciais         CredencialPlataforma[]
+  vinculos            VinculoFuncionario[]
+  produtos            Produto[]
 }
 
 model CredencialPlataforma {
@@ -187,6 +193,7 @@ model Entrega {
   id           Int          @id @default(autoincrement())
   pedidoId     Int          @unique @map("pedido_id")
   entregadorId Int?         @map("entregador_id")
+  distanciaKm  Float?       @map("distancia_km")
   custoEntrega Decimal      @map("custo_entrega") @db.Decimal(10, 2)
   dataHora     DateTime     @default(now()) @map("data_hora")
   pedido       Pedido       @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
