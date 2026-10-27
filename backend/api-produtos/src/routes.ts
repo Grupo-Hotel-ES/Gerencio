@@ -162,17 +162,19 @@ routes.patch('/produtos/:id', async (req, res) => {
     return
   }
 
-  const { nome, preco, restauranteId } = req.body
+  const { nome, preco, restauranteId, categoria } = req.body
 
   if ((nome !== undefined && (typeof nome !== 'string' || !nome.trim())) ||
+      (categoria !== undefined && (typeof categoria !== 'string' || !categoria.trim())) ||
       (preco !== undefined && (preco === null || preco === '' || !Number.isFinite(Number(preco)) || Number(preco) < 0 || Number(preco) > 99_999_999.99)) ||
       (restauranteId !== undefined && Number(restauranteId) !== produtoExistente.restauranteId)) {
-    res.status(400).json({ error: 'Nome ou preço inválido, ou tentativa de alterar o restaurante do produto' })
+    res.status(400).json({ error: 'Nome, categoria ou preço inválido, ou tentativa de alterar o restaurante do produto' })
     return
   }
 
   const dataToUpdate: Record<string, unknown> = {}
-  if (nome !== undefined) dataToUpdate.nome = nome
+  if (nome !== undefined) dataToUpdate.nome = nome.trim()
+  if (categoria !== undefined) dataToUpdate.categoria = categoria.trim()
   if (preco !== undefined) dataToUpdate.preco = Number(preco)
   if (restauranteId !== undefined) {
     const parsedRestauranteId = parseId(restauranteId)
@@ -186,6 +188,7 @@ routes.patch('/produtos/:id', async (req, res) => {
   const produtoAtualizado = await db.produto.update({
     where: { id },
     data: dataToUpdate,
+    include: { restaurante: true },
   })
 
   res.json(produtoAtualizado)
@@ -214,15 +217,34 @@ routes.delete('/produtos/:id', async (req, res) => {
 
 // --- MAPEAMENTO APP ---
 
+// A api-integracao e o mock procuram o mapeamento por estes identificadores,
+// então "iFood", "Uber Eats" ou "99 Food" são gravados como "ifood", "ubereats", "99food".
+const PLATAFORMAS: Record<string, string> = {
+  ifood: 'ifood',
+  rappi: 'rappi',
+  ubereats: 'ubereats',
+  uber: 'ubereats',
+  '99food': '99food',
+  '99': '99food',
+  keeta: 'keeta',
+}
+
+function normalizarPlataforma(valor: unknown) {
+  if (typeof valor !== 'string') return null
+  return PLATAFORMAS[valor.trim().toLowerCase().replace(/[\s_-]+/g, '')] ?? null
+}
+
 // 1. Criar novo mapeamento de produto para plataforma externa
 routes.post('/mapeamentos', async (req, res) => {
   try {
-    const { produtoId, plataforma, idExternoApp } = req.body
+    const { produtoId } = req.body
+    const plataforma = normalizarPlataforma(req.body.plataforma)
+    const idExternoApp = typeof req.body.idExternoApp === 'string' ? req.body.idExternoApp.trim() : ''
 
     const parsedProdutoId = parseId(produtoId)
 
-    if (!plataforma || !idExternoApp || parsedProdutoId === null) {
-      res.status(400).json({ error: 'produtoId, plataforma e idExternoApp válidos são obrigatórios.' })
+    if (!plataforma || !idExternoApp || idExternoApp.length > 100 || parsedProdutoId === null) {
+      res.status(400).json({ error: 'Informe produtoId, plataforma (ifood, rappi, ubereats, 99food ou keeta) e o código do produto na plataforma.' })
       return
     }
 
@@ -232,6 +254,24 @@ routes.post('/mapeamentos', async (req, res) => {
 
     if (!produtoExistente) {
       res.status(404).json({ error: 'Produto informado não existe.' })
+      return
+    }
+
+    // Um código aponta para um único produto, senão a integração não sabe qual baixar.
+    const conflitos = await db.mapeamentoApp.findMany({
+      where: {
+        plataforma: { equals: plataforma, mode: 'insensitive' },
+        OR: [{ idExternoApp }, { produtoId: parsedProdutoId }],
+      },
+      include: { produto: true },
+    })
+    const codigoEmUso = conflitos.find((m) => m.idExternoApp === idExternoApp)
+    if (codigoEmUso) {
+      res.status(409).json({ error: `O código ${idExternoApp} já está ligado a ${codigoEmUso.produto.nome} nesta plataforma.` })
+      return
+    }
+    if (conflitos.length > 0) {
+      res.status(409).json({ error: `Este produto já tem o código ${conflitos[0]!.idExternoApp} nesta plataforma. Remova-o antes de cadastrar outro.` })
       return
     }
 
@@ -252,11 +292,18 @@ routes.post('/mapeamentos', async (req, res) => {
   }
 })
 
-// 2. Listar todos os mapeamentos cadastrados
+// 2. Listar os mapeamentos cadastrados (opcionalmente de um restaurante: ?restauranteId=1)
 routes.get('/mapeamentos', async (req, res) => {
+  const restauranteId = req.query.restauranteId === undefined ? undefined : parseId(String(req.query.restauranteId))
+  if (restauranteId === null) {
+    res.status(400).json({ error: 'restauranteId inválido' })
+    return
+  }
   try {
     const mapeamentos = await db.mapeamentoApp.findMany({
+      where: restauranteId ? { produto: { restauranteId } } : {},
       include: { produto: true },
+      orderBy: { id: 'asc' },
     })
     res.json(mapeamentos)
   } catch (error) {
@@ -277,7 +324,7 @@ routes.get('/mapeamentos/buscar', async (req, res) => {
 
     const mapeamento = await db.mapeamentoApp.findFirst({
       where: {
-        plataforma: String(plataforma),
+        plataforma: { equals: normalizarPlataforma(plataforma) ?? String(plataforma), mode: 'insensitive' },
         idExternoApp: String(idExternoApp),
       },
       include: { produto: true },

@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 
+import { FormularioEdicaoProduto } from '@/components/dashboard/editar-produto';
 import { FormularioProduto } from '@/components/dashboard/novo-produto';
 import { Campo, SeletorRestaurante } from '@/components/dashboard/formularios';
 import { CartaoResumo, Grade, Pagina, useLarguraConteudo } from '@/components/dashboard/pagina';
 import { Aviso, Botao, Cartao, Chip, Divisor, Etiqueta, Texto } from '@/components/dashboard/ui';
 import { Espacamento, Raio } from '@/constants/tokens';
+import { PLATAFORMAS_DELIVERY } from '@/data/estoque';
 import { formatarHora, formatarReais } from '@/data/pedidos';
 import { useCores } from '@/hooks/use-cores';
-import { listarProdutos, listarRestaurantes, salvarEstoque, type Produto, type Restaurante } from '@/services/api-produtos';
+import {
+  listarMapeamentos, listarProdutos, listarRestaurantes, salvarEstoque, type Mapeamento, type Produto, type Restaurante,
+} from '@/services/api-produtos';
 
 type Filtro = 'todos' | 'disponiveis' | 'esgotados';
 type Rascunho = { valor: string; versaoEstoque: number };
@@ -16,10 +20,18 @@ const FILTROS: { id: Filtro; rotulo: string }[] = [
   { id: 'todos', rotulo: 'Todos' }, { id: 'disponiveis', rotulo: 'Disponíveis' }, { id: 'esgotados', rotulo: 'Esgotados' },
 ];
 
+/** Nomes das plataformas em que o produto tem código, na ordem de PLATAFORMAS_DELIVERY. */
+function plataformasComCodigo(mapeamentos: Mapeamento[]) {
+  const gravadas = mapeamentos.map((m) => m.plataforma.toLowerCase().replace(/[\s_-]+/g, ''));
+  return PLATAFORMAS_DELIVERY.filter(({ id }) => gravadas.includes(id)).map(({ nome }) => nome);
+}
+
 export default function GestaoDeEstoque() {
   const cores = useCores();
   const largura = useLarguraConteudo();
   const [produtos, setProdutos] = useState<Produto[] | null>(null);
+  const [mapeamentos, setMapeamentos] = useState<Mapeamento[]>([]);
+  const [editando, setEditando] = useState<number | null>(null);
   const [restaurantes, setRestaurantes] = useState<Restaurante[]>([]);
   const [restauranteId, setRestauranteId] = useState<number>();
   const [rascunhos, setRascunhos] = useState<Record<number, Rascunho>>({});
@@ -46,9 +58,9 @@ export default function GestaoDeEstoque() {
   const carregar = useCallback(async () => {
     const versao = ++consulta.current;
     try {
-      const dados = await listarProdutos(restauranteId);
+      const [dados, codigos] = await Promise.all([listarProdutos(restauranteId), listarMapeamentos(restauranteId)]);
       if (versao !== consulta.current) return;
-      setProdutos(dados); setAtualizadoEm(new Date()); setErro(null);
+      setProdutos(dados); setMapeamentos(codigos); setAtualizadoEm(new Date()); setErro(null);
     } catch (e) { if (versao === consulta.current) setErro((e as Error).message); }
   }, [restauranteId]);
 
@@ -101,13 +113,14 @@ export default function GestaoDeEstoque() {
     <Pagina titulo="Gestão de estoque" subtitulo="Consulte o saldo real e ajuste as unidades disponíveis para venda."
       acao={<Botao rotulo="Cadastrar produto" icone="mais" variante="primario" disabled={!restaurantes.length || salvando || pendentes > 0} onPress={() => setNovoProduto(true)} />}>
       <SeletorRestaurante restaurantes={restaurantes} valor={restauranteId} onChange={(id) => {
-        consulta.current += 1; setProdutos(null); setAtualizadoEm(null); setRestauranteId(id);
+        consulta.current += 1; setProdutos(null); setAtualizadoEm(null); setEditando(null); setRestauranteId(id);
       }} todos desabilitado={pendentes > 0 || salvando || novoProduto} />
       {erroRestaurantes && <Texto cor="feedbackErro" accessibilityRole="alert">Restaurantes: {erroRestaurantes}</Texto>}
       {!erroRestaurantes && restaurantes.length === 0 && <Texto cor="textoSecundario">É necessário cadastrar um restaurante antes de criar produtos.</Texto>}
       {novoProduto && <FormularioProduto restaurantes={restaurantes} restauranteInicial={restauranteId}
-        onFechar={() => setNovoProduto(false)} onConcluir={(id) => {
-          setNovoProduto(false); setFiltro('todos'); setBusca('');
+        onFechar={() => setNovoProduto(false)} onConcluir={(id, produtoId) => {
+          // Abre a edição do produto novo para cadastrar os códigos nas plataformas.
+          setNovoProduto(false); setFiltro('todos'); setBusca(''); setEditando(produtoId);
           if (restauranteId !== undefined && restauranteId !== id) {
             consulta.current += 1; setProdutos(null); setAtualizadoEm(null); setRestauranteId(id);
           } else carregar();
@@ -133,6 +146,8 @@ export default function GestaoDeEstoque() {
         {visiveis.map((p) => {
           const rascunho = rascunhos[p.id];
           const valor = rascunho?.valor ?? String(p.quantidade);
+          const codigosDoProduto = mapeamentos.filter((m) => m.produtoId === p.id);
+          const comCodigo = plataformasComCodigo(codigosDoProduto);
           return <View key={p.id} style={styles.bloco}>
             <View style={styles.linha}>
               <View style={styles.produto}>
@@ -140,6 +155,7 @@ export default function GestaoDeEstoque() {
                 <Texto cor="textoSecundario">{p.categoria} • {formatarReais(p.preco)}</Texto>
                 <Texto cor="textoSecundario">{p.restaurante?.nome}</Texto>
                 <Texto cor="textoSecundario">Salvo: {p.quantidade} un.{rascunho ? ' • Ajuste pendente' : ''}</Texto>
+                <Texto cor="textoSecundario">{comCodigo.length ? 'Código em: ' + comCodigo.join(', ') : 'Sem código nas plataformas de delivery'}</Texto>
               </View>
               <View style={styles.linha}>
                 <Botao rotulo="−" accessibilityLabel={'Diminuir ' + p.nome} disabled={salvando || novoProduto || Number(valor) <= 0}
@@ -150,7 +166,15 @@ export default function GestaoDeEstoque() {
                   onPress={() => editar(p, String((Number(valor) || 0) + 1))} />
               </View>
               <Etiqueta rotulo={p.quantidade > 0 ? 'Disponível' : 'Esgotado'} corPonto={p.quantidade > 0 ? cores.statusEntregue : cores.statusCancelado} />
+              <Botao rotulo={editando === p.id ? 'Fechar edição' : 'Editar'} icone="editar" accessibilityLabel={'Editar ' + p.nome}
+                disabled={salvando || novoProduto} onPress={() => setEditando(editando === p.id ? null : p.id)} />
             </View>
+            {editando === p.id && <FormularioEdicaoProduto produto={p} mapeamentos={codigosDoProduto} onAlterado={carregar}
+              onFechar={() => setEditando(null)} onExcluido={() => {
+                setEditando(null);
+                setRascunhos((atuais) => { const novos = { ...atuais }; delete novos[p.id]; return novos; });
+                carregar();
+              }} />}
             <Divisor />
           </View>;
         })}
