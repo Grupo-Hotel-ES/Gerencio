@@ -22,6 +22,9 @@ O Gerôncio centraliza pedidos de várias plataformas de delivery (iFood, Rappi,
 │   ├── api-restaurantes/   # :3003  CRUD de restaurantes
 │   ├── api-produtos/       # :3004  produtos e mapeamentos produto ↔ id externo da plataforma
 │   ├── api-integracao/     # :3005  webhooks/polling das plataformas de delivery
+│   ├── api-pagamentos/     # :3006  assinatura do Gerêncio via Stripe Checkout
+│   ├── chatbot/            # :5678  n8n (workflows do chatbot)
+│   ├── llm/                # :11434 Ollama (LLM do chatbot)
 │   └── packages/shared-db/ # Prisma schema, migrations e cliente compartilhado
 ├── frontend/         # App React Native + Expo (expo-router), web e mobile
 ├── mock/             # Simulador das plataformas de delivery (API + banco + formulário web)
@@ -37,14 +40,15 @@ Na raiz (atalhos definidos em `package.json`):
 | --- | --- |
 | `pnpm db` | Sobe só o Postgres do backend (Docker, porta 5432) |
 | `pnpm backend` | Roda todos os `api-*` em modo watch (`tsx watch`) |
-| `pnpm backend:docker` | Sobe Postgres + APIs em containers |
+| `pnpm backend:docker` | Sobe Postgres + APIs em containers (sem o chatbot) |
+| `pnpm chatbot` | Sobe o chatbot: n8n, Evolution API e Ollama |
 | `pnpm db:migrate` | `prisma migrate dev` no schema compartilhado |
 | `pnpm studio` | Prisma Studio do banco principal |
 | `pnpm frontend` / `pnpm dev` | Inicia o Expo |
 | `pnpm mock` | Sobe banco + API do mock e abre o formulário web |
 | `pnpm mock:studio` | Prisma Studio do banco do mock |
 
-Dentro de `backend/`: `pnpm typecheck` (roda `tsc --noEmit` em todos os pacotes), `pnpm db:generate`, `pnpm docker:logs`, `pnpm docker:down`.
+Dentro de `backend/`: `pnpm typecheck` (roda `tsc --noEmit` em todos os pacotes), `pnpm db:generate`, `pnpm docker:logs`, `pnpm docker:down` (derruba tudo, inclusive o chatbot), `pnpm chatbot:up:gpu`, `pnpm chatbot:down`.
 Dentro de `frontend/`: `pnpm web`, `pnpm android`, `pnpm ios`, `pnpm lint`.
 
 **Antes de concluir uma mudança**, rode `pnpm typecheck` em `backend/` e/ou `pnpm lint` em `frontend/`. Não há testes automatizados; os testes manuais das rotas ficam em `testes/*.http`.
@@ -95,6 +99,32 @@ routes.get('/pedidos/:id', async (req, res) => {
 - `Decimal` (preços) chega ao frontend como **string** no JSON; converta com `Number(...)`.
 - Status de pedido: `novo → em_preparo → pronto → saiu_para_entrega → entregue` (ou `cancelado`).
 - Variáveis de ambiente ficam em `backend/.env` (carregado por `--env-file-if-exists`). `DATABASE_URL` padrão: `postgresql://geroncio:geroncio_dev@localhost:5432/geroncio`.
+
+### Chatbot (n8n)
+
+Os serviços do chatbot (`chatbot`, `evolution-api` e `llm`) ficam no profile `chatbot` do compose, então **não** sobem com `pnpm backend:docker`: rode `pnpm chatbot` na raiz (as APIs precisam estar de pé para o workflow funcionar).
+
+`chatbot/Dockerfile` estende a imagem oficial `n8nio/n8n` com a versão fixada em `ARG N8N_VERSION`. No compose, o serviço `chatbot` expõe o editor em http://localhost:5678 e guarda os dados (workflows, credenciais, chave de criptografia) no volume `geroncio_n8ndata`, usando o SQLite interno. Não aponte o banco interno do n8n para o Postgres do Prisma: as tabelas dele quebrariam o `prisma migrate`. Dentro do compose, os workflows chamam as APIs pelo nome do serviço (`http://api-pedidos:3002/api`).
+
+A LLM do chatbot roda no serviço `llm` (`backend/llm/`, Ollama com a versão em `ARG OLLAMA_VERSION`), na porta 11434. O modelo é escolhido por `OLLAMA_MODEL` no `backend/.env` (padrão `qwen3.5:4b`) e baixado na subida do container para o volume `geroncio_ollama`; o healthcheck só fica `healthy` quando o modelo está pronto. Dentro do compose, a URL é `http://llm:11434`. Para usar GPU NVIDIA (precisa do `nvidia-container-toolkit`), suba com `pnpm chatbot:up:gpu` em `backend/`.
+
+O atendimento pelo WhatsApp é o workflow `chatbot/workflows/atendimento-whatsapp.json`. A Evolution API (instância `geroncio`, QR code em http://localhost:8080/manager) envia `MESSAGES_UPSERT` para `http://chatbot:5678/webhook/whatsapp`, e o workflow funciona como orquestrador:
+
+- **Debounce**: cada mensagem entra em `MensagemChatbot`, e depois de 4 s só a execução da mensagem mais recente do telefone segue, com todas as mensagens pendentes juntas.
+- **Sessão**: histórico, cliente, pedido pendente e último pedido ficam em `SessaoChatbot` (Prisma), lidos e gravados pelo nó Postgres.
+- **Loop**: a LLM responde sempre um JSON `{ "acao", "dados" }`, restrito pelo `format` do Ollama. O orquestrador executa a ação, devolve o resultado como mensagem `--- RESULTADO <AÇÃO> ---` e chama a LLM de novo, até `MENSAGEM` (que envia pelo WhatsApp e encerra) ou até 6 passos.
+- **Ações**: `MENSAGEM`, `CARDAPIO`, `RESUMIR_PEDIDO` (valida ids e calcula o total com os preços do banco), `CONFIRMAR_PEDIDO` (só depois de o cliente responder ao resumo) e `CONSULTAR_PEDIDO` (só pedidos do próprio cliente). Para criar uma ação, inclua-a no `enum` e nas instruções de "Preparar chamada" e numa saída do Switch "Ação".
+
+O restaurante atendido vem de `CHATBOT_RESTAURANTE_ID` (padrão 1). Depois de editar o JSON (ou exportá-lo do editor), rode `sh chatbot/importar-workflow.sh` em `backend/`: o script cria as credenciais (Postgres e Evolution, a partir do `.env`), importa, publica e reinicia o n8n.
+
+### Pagamentos (Stripe)
+
+O `api-pagamentos` cria sessões do **Stripe Checkout** para a assinatura (tela `assinatura/pagamento` do frontend): cartão vira assinatura mensal (`mode: 'subscription'`) e Pix paga um mês avulso (`mode: 'payment'`). O preço é montado inline (`price_data`, `PLANO_VALOR_CENTAVOS`, padrão 14900), então não é preciso criar produto no painel do Stripe. Os dados do cartão são digitados só na página do Stripe.
+
+- Para ativar, preencha `STRIPE_SECRET_KEY` (e `STRIPE_WEBHOOK_SECRET`) no `backend/.env`. Sem a chave, `GET /api/pagamentos/config` responde `configurado: false` e o frontend fica em modo demonstração.
+- O Pix precisa estar habilitado em *Settings → Payment methods* da conta Stripe (conta brasileira).
+- Webhook: `POST /api/webhooks/stripe` (assinatura validada com `STRIPE_WEBHOOK_SECRET`). Em desenvolvimento: `stripe listen --forward-to localhost:3006/api/webhooks/stripe`. Por enquanto os eventos só vão para o log; ainda não há modelo de assinatura no banco.
+- No frontend, a URL vem de `EXPO_PUBLIC_API_PAGAMENTOS_URL`. No celular, o Stripe volta para a página web definida em `EXPO_PUBLIC_URL_RETORNO_PAGAMENTO`, e o app consulta o status ao fechar o navegador.
 
 ### Integração com plataformas
 

@@ -1,18 +1,19 @@
 import { Link, usePathname, type Href } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Divisor, Icone, Texto, type NomeIcone } from './ui';
 
 import { Espacamento, Raio } from '@/constants/tokens';
+import { usePerfil } from '@/data/perfil-context';
 import { useCores } from '@/hooks/use-cores';
 
-// A página de Rotas ainda não foi implementada, por isso não tem `href`.
 const NAVEGACAO: { rotulo: string; icone: NomeIcone; href?: Href }[] = [
   { rotulo: 'Pedidos', icone: 'pedidos', href: '/' },
   { rotulo: 'Estoque', icone: 'estoque', href: '/estoque' },
   { rotulo: 'Relatórios', icone: 'relatorios', href: '/relatorios' },
   { rotulo: 'Motoboys', icone: 'motoboy', href: '/motoboys' as Href },
-  { rotulo: 'Rotas', icone: 'rotas' },
+  { rotulo: 'Rotas', icone: 'rotas', href: '/rotas' },
+  { rotulo: 'Configurações', icone: 'configuracoes', href: '/configuracoes' },
 ];
 
 function ItensNavegacao() {
@@ -58,56 +59,65 @@ export function NavegacaoCompacta() {
 
 export function Sidebar() {
   const cores = useCores();
+  const { perfil } = usePerfil();
 
   return (
     <View style={[styles.container, { backgroundColor: cores.superficie, borderColor: cores.borda }]}>
-      <View style={styles.logo}>
-        <View style={[styles.logoIcone, { backgroundColor: cores.brand }]}>
-          <Icone nome="logo" cor={cores.textOnBrand} />
-        </View>
-        <Texto tamanho={24} peso={700}>
-          mesa
-        </Texto>
-      </View>
-
-      <Divisor />
-
-      <View style={styles.navegacao}>
-        <Texto tamanho={13} cor="textoSecundario" style={styles.secao}>
-          OPERAÇÃO DO RESTAURANTE
-        </Texto>
-        <ItensNavegacao />
-      </View>
-
-      <View style={styles.rodape}>
-        <View style={[styles.destaque, { backgroundColor: cores.fundo, borderColor: cores.borda }]}>
-          <Icone nome="camadas" />
-          <View style={styles.destaqueTexto}>
-            <Texto tamanho={16} peso={500}>
-              Tudo em um lugar
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollConteudo}>
+        <View style={styles.topo}>
+          <View style={styles.logo}>
+            <View style={[styles.logoIcone, { backgroundColor: cores.brand }]}>
+              <Icone nome="logo" cor={cores.textOnBrand} />
+            </View>
+            <Texto tamanho={24} peso={700}>
+              Gerêncio
             </Texto>
-            <Texto tamanho={13} cor="textoSecundario">
-              Seis canais, uma operação.
+          </View>
+
+          <Divisor />
+
+          <View style={styles.navegacao}>
+            <Texto tamanho={13} cor="textoSecundario" style={styles.secao}>
+              OPERAÇÃO DO RESTAURANTE
             </Texto>
+            <ItensNavegacao />
           </View>
         </View>
 
-        <Pressable accessibilityRole="link" style={styles.ajuda}>
-          <Icone nome="ajuda" />
-          <Texto peso={500}>Central de ajuda</Texto>
-        </Pressable>
+        <View style={styles.rodape}>
+          <View style={[styles.destaque, { backgroundColor: cores.fundo, borderColor: cores.borda }]}>
+            <Icone nome="camadas" />
+            <View style={styles.destaqueTexto}>
+              <Texto tamanho={16} peso={500}>
+                Tudo em um lugar
+              </Texto>
+              <Texto tamanho={13} cor="textoSecundario">
+                Seis canais, uma operação.
+              </Texto>
+            </View>
+          </View>
 
-        <Divisor />
+          <Pressable accessibilityRole="link" style={styles.ajuda}>
+            <Icone nome="ajuda" />
+            <Texto peso={500}>Central de ajuda</Texto>
+          </Pressable>
 
-        <View style={styles.usuario}>
-          <Texto tamanho={16} peso={500}>
-            Gerôncio
-          </Texto>
-          <Texto tamanho={13} cor="textoSecundario">
-            Painel local
-          </Texto>
+          <Divisor />
+
+          <Link href="/perfil" asChild>
+            <Pressable style={styles.usuario}>
+              <Texto tamanho={16} peso={500}>
+                {perfil.nomeRestaurante}
+              </Texto>
+              <Texto tamanho={13} cor="textoSecundario">
+                {perfil.nomeCompleto.split(' ')[0]} • {perfil.cargo}
+              </Texto>
+            </Pressable>
+          </Link>
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -116,14 +126,22 @@ const styles = StyleSheet.create({
   container: {
     width: 224,
     borderRightWidth: 1,
+  },
+  scrollConteudo: {
+    flexGrow: 1,
+    justifyContent: 'space-between',
     padding: Espacamento.large,
+    gap: Espacamento.xlarge,
+  },
+  topo: {
+    gap: Espacamento.small,
   },
   logo: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Espacamento.small,
-    paddingTop: Espacamento.large,
-    paddingBottom: Espacamento.xlarge,
+    paddingTop: Espacamento.small,
+    paddingBottom: Espacamento.medium,
   },
   logoIcone: {
     width: 32,
@@ -133,9 +151,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   navegacao: {
-    flex: 1,
     gap: Espacamento.small,
-    paddingTop: Espacamento.large,
+    paddingTop: Espacamento.medium,
   },
   secao: {
     marginBottom: Espacamento.small,
@@ -158,6 +175,7 @@ const styles = StyleSheet.create({
   },
   rodape: {
     gap: Espacamento.large,
+    paddingTop: Espacamento.large,
   },
   destaque: {
     flexDirection: 'row',

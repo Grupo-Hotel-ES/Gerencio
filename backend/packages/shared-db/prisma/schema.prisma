@@ -200,3 +200,25 @@ model Entrega {
   pedido       Pedido       @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
   entregador   Funcionario? @relation(fields: [entregadorId], references: [id])
 }
+// Estado da conversa do chatbot do WhatsApp, uma linha por telefone.
+// Lido e gravado direto pelo workflow do n8n (nó Postgres).
+model SessaoChatbot {
+  telefone       String   @id
+  historico      Json     @default("[]")
+  clienteId      Int?     @map("cliente_id")
+  pedidoPendente Json?    @map("pedido_pendente")
+  ultimoPedidoId Int?     @map("ultimo_pedido_id")
+  atualizadoEm   DateTime @default(now()) @map("atualizado_em")
+}
+
+// Mensagens recebidas e ainda não respondidas. O workflow espera alguns
+// segundos e responde todas de um telefone juntas (debounce).
+model MensagemChatbot {
+  id         Int      @id @default(autoincrement())
+  telefone   String
+  mensagemId String   @unique @map("mensagem_id")
+  texto      String
+  recebidaEm DateTime @default(now()) @map("recebida_em")
+
+  @@index([telefone])
+}
