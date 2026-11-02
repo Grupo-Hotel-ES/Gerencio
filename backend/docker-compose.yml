@@ -95,6 +95,23 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # Assinatura do Gerêncio via Stripe Checkout. Sem STRIPE_SECRET_KEY no
+  # backend/.env, responde "não configurado" e o frontend fica em modo demonstração.
+  api-pagamentos:
+    container_name: geroncio-api-pagamentos
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: ./api-pagamentos/Dockerfile
+    ports:
+      - "3006:3006"
+    environment:
+      NODE_ENV: production
+      PORT: 3006
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      PLANO_VALOR_CENTAVOS: ${PLANO_VALOR_CENTAVOS:-14900}
+
   # Workflows do chatbot. Usa o SQLite interno do n8n (volume próprio) para não
   # criar tabelas no banco do Prisma. Dentro da rede do compose, as APIs ficam
   # em http://api-<nome>:<porta>/api (ex.: http://api-pedidos:3002/api).

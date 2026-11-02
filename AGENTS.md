@@ -22,6 +22,7 @@ O Gerôncio centraliza pedidos de várias plataformas de delivery (iFood, Rappi,
 │   ├── api-restaurantes/   # :3003  CRUD de restaurantes
 │   ├── api-produtos/       # :3004  produtos e mapeamentos produto ↔ id externo da plataforma
 │   ├── api-integracao/     # :3005  webhooks/polling das plataformas de delivery
+│   ├── api-pagamentos/     # :3006  assinatura do Gerêncio via Stripe Checkout
 │   ├── chatbot/            # :5678  n8n (workflows do chatbot)
 │   ├── llm/                # :11434 Ollama (LLM do chatbot)
 │   └── packages/shared-db/ # Prisma schema, migrations e cliente compartilhado
@@ -115,6 +116,15 @@ O atendimento pelo WhatsApp é o workflow `chatbot/workflows/atendimento-whatsap
 - **Ações**: `MENSAGEM`, `CARDAPIO`, `RESUMIR_PEDIDO` (valida ids e calcula o total com os preços do banco), `CONFIRMAR_PEDIDO` (só depois de o cliente responder ao resumo) e `CONSULTAR_PEDIDO` (só pedidos do próprio cliente). Para criar uma ação, inclua-a no `enum` e nas instruções de "Preparar chamada" e numa saída do Switch "Ação".
 
 O restaurante atendido vem de `CHATBOT_RESTAURANTE_ID` (padrão 1). Depois de editar o JSON (ou exportá-lo do editor), rode `sh chatbot/importar-workflow.sh` em `backend/`: o script cria as credenciais (Postgres e Evolution, a partir do `.env`), importa, publica e reinicia o n8n.
+
+### Pagamentos (Stripe)
+
+O `api-pagamentos` cria sessões do **Stripe Checkout** para a assinatura (tela `assinatura/pagamento` do frontend): cartão vira assinatura mensal (`mode: 'subscription'`) e Pix paga um mês avulso (`mode: 'payment'`). O preço é montado inline (`price_data`, `PLANO_VALOR_CENTAVOS`, padrão 14900), então não é preciso criar produto no painel do Stripe. Os dados do cartão são digitados só na página do Stripe.
+
+- Para ativar, preencha `STRIPE_SECRET_KEY` (e `STRIPE_WEBHOOK_SECRET`) no `backend/.env`. Sem a chave, `GET /api/pagamentos/config` responde `configurado: false` e o frontend fica em modo demonstração.
+- O Pix precisa estar habilitado em *Settings → Payment methods* da conta Stripe (conta brasileira).
+- Webhook: `POST /api/webhooks/stripe` (assinatura validada com `STRIPE_WEBHOOK_SECRET`). Em desenvolvimento: `stripe listen --forward-to localhost:3006/api/webhooks/stripe`. Por enquanto os eventos só vão para o log; ainda não há modelo de assinatura no banco.
+- No frontend, a URL vem de `EXPO_PUBLIC_API_PAGAMENTOS_URL`. No celular, o Stripe volta para a página web definida em `EXPO_PUBLIC_URL_RETORNO_PAGAMENTO`, e o app consulta o status ao fechar o navegador.
 
 ### Integração com plataformas
 
