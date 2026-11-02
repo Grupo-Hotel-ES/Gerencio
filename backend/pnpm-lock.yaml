@@ -266,6 +266,9 @@ importers:
 
   api-pagamentos:
     dependencies:
+      '@geroncio/shared-db':
+        specifier: workspace:*
+        version: link:../packages/shared-db
       express:
         specifier: ^5.2.1
         version: 5.2.1

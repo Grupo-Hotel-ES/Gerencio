@@ -17,6 +17,7 @@ import {
   type StatusPedido,
 } from '@/data/pedidos';
 import { useCores } from '@/hooks/use-cores';
+import { buscarConfigPagamento } from '@/services/api-pagamentos';
 import { atualizarStatus, listarPedidosAtivos } from '@/services/api-pedidos';
 import { listarRestaurantes, type Restaurante } from '@/services/api-produtos';
 
@@ -50,6 +51,7 @@ export default function DashboardDePedidos() {
   const [restauranteId, setRestauranteId] = useState<number>();
   const [novoPedido, setNovoPedido] = useState(false);
   const [ocupados, setOcupados] = useState<number[]>([]);
+  const [pagamentoOnline, setPagamentoOnline] = useState(false);
   const operacoes = useRef(new Set<number>());
   const consulta = useRef(0);
 
@@ -58,6 +60,18 @@ export default function DashboardDePedidos() {
     const atualizar = () => listarRestaurantes().then((dados) => {
       if (ativo) { setRestaurantes(dados); setErroRestaurantes(null); }
     }).catch((e: Error) => { if (ativo) setErroRestaurantes(e.message); });
+    atualizar();
+    const intervalo = setInterval(atualizar, INTERVALO_ATUALIZACAO_MS);
+    return () => { ativo = false; clearInterval(intervalo); };
+  }, []);
+
+  // Só oferece link de pagamento quando o Stripe está configurado na api-pagamentos.
+  // Confere de novo a cada atualização: a API pode subir (ou ganhar as chaves) com o painel aberto.
+  useEffect(() => {
+    let ativo = true;
+    const atualizar = () => buscarConfigPagamento().then((config) => {
+      if (ativo) setPagamentoOnline(config?.configurado ?? false);
+    });
     atualizar();
     const intervalo = setInterval(atualizar, INTERVALO_ATUALIZACAO_MS);
     return () => { ativo = false; clearInterval(intervalo); };
@@ -244,6 +258,7 @@ export default function DashboardDePedidos() {
               onAvancar={() => alterar(pedido, STATUS[pedido.status].proximo)}
               onCancelar={() => alterar(pedido, 'cancelado')}
               ocupado={ocupados.includes(pedido.numero)}
+              pagamentoOnline={pagamentoOnline}
             />
           ))}
         </Grade>
