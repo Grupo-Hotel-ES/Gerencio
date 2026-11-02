@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { OrderCard } from '@/components/dashboard/order-card';
+import { FormularioPedido } from '@/components/dashboard/novo-pedido';
+import { SeletorRestaurante } from '@/components/dashboard/formularios';
 import { CartaoResumo, Grade, Pagina, useLarguraConteudo } from '@/components/dashboard/pagina';
 import { Botao, Cartao, Chip, Icone, Texto } from '@/components/dashboard/ui';
 import { Fonts } from '@/constants/theme';
@@ -12,9 +14,11 @@ import {
   STATUS,
   type Pedido,
   type StatusAtivo,
+  type StatusPedido,
 } from '@/data/pedidos';
 import { useCores } from '@/hooks/use-cores';
 import { atualizarStatus, listarPedidosAtivos } from '@/services/api-pedidos';
+import { listarRestaurantes, type Restaurante } from '@/services/api-produtos';
 
 type Filtro = 'todos' | StatusAtivo;
 
@@ -23,6 +27,7 @@ const FILTROS: { id: Filtro; rotulo: string }[] = [
   { id: 'novo', rotulo: 'Novos' },
   { id: 'em_preparo', rotulo: 'Preparando' },
   { id: 'pronto', rotulo: 'Prontos' },
+  { id: 'saiu_para_entrega', rotulo: 'Em entrega' },
 ];
 
 const TODOS_OS_CANAIS = 'Todos os canais';
@@ -40,21 +45,42 @@ export default function DashboardDePedidos() {
   const [menuCanais, setMenuCanais] = useState(false);
   const [buscando, setBuscando] = useState(false);
   const [busca, setBusca] = useState('');
-
-  const carregar = useCallback(async () => {
-    try {
-      setAtivos(await listarPedidosAtivos());
-      setAtualizadoEm(new Date());
-      setErro(null);
-    } catch {
-      setErro('Não foi possível carregar os pedidos. Verifique se a api-pedidos está no ar.');
-    }
-  }, []);
+  const [restaurantes, setRestaurantes] = useState<Restaurante[]>([]);
+  const [erroRestaurantes, setErroRestaurantes] = useState<string | null>(null);
+  const [restauranteId, setRestauranteId] = useState<number>();
+  const [novoPedido, setNovoPedido] = useState(false);
+  const [ocupados, setOcupados] = useState<number[]>([]);
+  const operacoes = useRef(new Set<number>());
+  const consulta = useRef(0);
 
   useEffect(() => {
+    let ativo = true;
+    const atualizar = () => listarRestaurantes().then((dados) => {
+      if (ativo) { setRestaurantes(dados); setErroRestaurantes(null); }
+    }).catch((e: Error) => { if (ativo) setErroRestaurantes(e.message); });
+    atualizar();
+    const intervalo = setInterval(atualizar, INTERVALO_ATUALIZACAO_MS);
+    return () => { ativo = false; clearInterval(intervalo); };
+  }, []);
+
+  const carregar = useCallback(async () => {
+    const versao = ++consulta.current;
+    try {
+      const dados = await listarPedidosAtivos(restauranteId);
+      if (versao !== consulta.current) return;
+      setAtivos(dados);
+      setAtualizadoEm(new Date());
+      setErro(null);
+    } catch (e) {
+      if (versao === consulta.current) setErro((e as Error).message);
+    }
+  }, [restauranteId]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carregar atualiza o estado somente após a resposta HTTP.
     carregar();
     const intervalo = setInterval(carregar, INTERVALO_ATUALIZACAO_MS);
-    return () => clearInterval(intervalo);
+    return () => { clearInterval(intervalo); consulta.current += 1; };
   }, [carregar]);
 
   const fila = ativos ?? [];
@@ -70,17 +96,21 @@ export default function DashboardDePedidos() {
       (!termo || p.cliente.toLowerCase().includes(termo) || String(p.numero).includes(termo)),
   );
 
-  const avancar = async (pedido: Pedido) => {
+  const alterar = async (pedido: Pedido, status: StatusPedido) => {
+    if (operacoes.current.has(pedido.numero)) return;
+    operacoes.current.add(pedido.numero); setOcupados([...operacoes.current]);
     try {
-      await atualizarStatus(pedido.numero, STATUS[pedido.status].proximo);
+      await atualizarStatus(pedido.numero, status);
       await carregar();
-    } catch {
-      setErro(`Não foi possível atualizar o pedido #${pedido.numero}. Tente novamente.`);
+    } catch (e) {
+      setErro(`Pedido #${pedido.numero}: ${(e as Error).message}`);
+    } finally {
+      operacoes.current.delete(pedido.numero); setOcupados([...operacoes.current]);
     }
   };
 
   const colunasPedidos = larguraConteudo >= 1000 ? 3 : larguraConteudo >= 640 ? 2 : 1;
-  const colunasResumo = larguraConteudo >= 1000 ? 4 : larguraConteudo >= 640 ? 2 : 1;
+  const colunasResumo = larguraConteudo >= 1000 ? 5 : larguraConteudo >= 640 ? 2 : 1;
 
   const resumo = [
     {
@@ -91,6 +121,7 @@ export default function DashboardDePedidos() {
     { rotulo: 'Novos', valor: contar('novo'), detalhe: 'Aguardando aceite' },
     { rotulo: 'Preparando', valor: contar('em_preparo'), detalhe: 'Em produção na cozinha' },
     { rotulo: 'Prontos', valor: contar('pronto'), detalhe: 'Aguardando saída ou retirada' },
+    { rotulo: 'Em entrega', valor: contar('saiu_para_entrega'), detalhe: 'Aguardando confirmação de entrega' },
   ];
 
   const controle = [styles.controle, { borderColor: cores.borda, backgroundColor: cores.superficie }];
@@ -99,7 +130,19 @@ export default function DashboardDePedidos() {
     <Pagina
       titulo="Dashboard de pedidos"
       subtitulo="Acompanhe a cozinha e as entregas, sem trocar de aplicativo."
-      acao={<Botao rotulo="Novo pedido" icone="mais" variante="primario" />}>
+      acao={<Botao rotulo="Novo pedido" icone="mais" variante="primario" disabled={restaurantes.length === 0} onPress={() => setNovoPedido(true)} />}>
+      <SeletorRestaurante restaurantes={restaurantes} valor={restauranteId} onChange={(id) => {
+        consulta.current += 1; setAtivos(null); setAtualizadoEm(null); setRestauranteId(id);
+      }} todos desabilitado={ocupados.length > 0} />
+      {erroRestaurantes && <Texto cor="feedbackErro" accessibilityRole="alert">Restaurantes: {erroRestaurantes}</Texto>}
+      {restaurantes.length === 0 && <Texto cor="textoSecundario">Para cadastrar pedidos, é necessário ter um restaurante cadastrado e a API de restaurantes disponível.</Texto>}
+      {novoPedido && <FormularioPedido restaurantes={restaurantes} restauranteInicial={restauranteId}
+        onFechar={() => setNovoPedido(false)} onConcluir={(id) => {
+          setNovoPedido(false); setFiltro('todos'); setCanal(null); setBusca('');
+          if (restauranteId !== undefined && restauranteId !== id) {
+            consulta.current += 1; setAtivos(null); setAtualizadoEm(null); setRestauranteId(id);
+          } else carregar();
+        }} />}
       <Grade colunas={colunasResumo}>
         {resumo.map((item) => (
           <CartaoResumo key={item.rotulo} {...item} />
@@ -113,6 +156,7 @@ export default function DashboardDePedidos() {
         <Texto tamanho={13} cor="textoSecundario">
           {atualizadoEm ? `Atualizado às ${formatarHora(atualizadoEm)}` : 'Carregando…'}
         </Texto>
+        <Botao rotulo="Atualizar" icone="sincronizar" onPress={carregar} />
       </View>
 
       <View style={styles.barra}>
@@ -197,7 +241,9 @@ export default function DashboardDePedidos() {
             <OrderCard
               key={pedido.numero}
               pedido={pedido}
-              onAvancar={() => avancar(pedido)}
+              onAvancar={() => alterar(pedido, STATUS[pedido.status].proximo)}
+              onCancelar={() => alterar(pedido, 'cancelado')}
+              ocupado={ocupados.includes(pedido.numero)}
             />
           ))}
         </Grade>

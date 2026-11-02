@@ -64,11 +64,16 @@ export async function processarEventosPendentes() {
 
       try {
         if (!adapter) throw new Error(`Plataforma não suportada: ${evento.plataforma}`)
+        // Rappi e Uber Eats mandam dados do pedido no próprio webhook (o pedido completo ou o
+        // resource_href). Eles só existem no payload gravado, então a notificação é extraída de novo.
+        const original = adapter.extrairNotificacoes(evento.payload)
+          .find((notificacao) => notificacao.pedidoIdExterno === evento.pedidoIdExterno)
         await processarNotificacao(plataforma, adapter, {
           eventoId: evento.eventoId,
           pedidoIdExterno: evento.pedidoIdExterno,
           lojaIdExterno: evento.lojaIdExterno ?? undefined,
           tipo: evento.tipo,
+          pedido: original?.pedido,
         }, evento.id)
       } catch (erro) {
         const esgotouTentativas = tentativa >= MAX_TENTATIVAS

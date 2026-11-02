@@ -8,6 +8,7 @@ export function useColorScheme() {
   const [hasHydrated, setHasHydrated] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Sinaliza a hidratação antes de usar o tema do navegador.
     setHasHydrated(true);
   }, []);
 

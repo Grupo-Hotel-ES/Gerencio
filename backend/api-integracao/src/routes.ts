@@ -1,6 +1,6 @@
 import { Router, type Request } from 'express'
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { db, type Prisma } from '@geroncio/shared-db'
+import { db, prepararItensPedido, type Prisma } from '@geroncio/shared-db'
 
 const routes = Router()
 
@@ -242,7 +242,11 @@ const ubereats: AdapterPlataforma = {
     const authRes = await fetch(`${mockUrl}/oauth/v2/token`, { method: 'POST' });
     if (!authRes.ok) throw new Error('Falha ao obter token OAuth do Uber Eats');
     
-    const { access_token } = await authRes.json();
+    const autenticacao = await authRes.json() as { access_token?: unknown };
+    if (typeof autenticacao.access_token !== 'string' || !autenticacao.access_token) {
+      throw new Error('Token OAuth do Uber Eats inválido');
+    }
+    const access_token = autenticacao.access_token;
 
     // O mock monta o resource_href com localhost; em container, troca a origem pela do MOCK_API_URL
     const urlPedido = process.env.MOCK_API_URL
@@ -351,7 +355,9 @@ async function salvarPedido(
       return existente
     }
 
+    const preparados = await prepararItensPedido(tx, await mapearItens(tx, plataforma, pedido.itens))
     const data: Prisma.PedidoCreateInput = {
+      restaurante: { connect: { id: preparados.restauranteId } },
       pedidoExternoId: pedidoIdExterno,
       nomeCliente: pedido.nomeCliente,
       preco: pedido.preco,
@@ -361,7 +367,7 @@ async function salvarPedido(
       cepDestino: pedido.cepDestino,
       latitude: pedido.latitude,
       longitude: pedido.longitude,
-      itens: { create: await mapearItens(tx, plataforma, pedido.itens) },
+      itens: { create: preparados.itens },
     }
     const salvo = await tx.pedido.create({ data })
     await tx.eventoIntegracao.update({

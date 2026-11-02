@@ -11,7 +11,7 @@ import { useCores } from '@/hooks/use-cores';
 
 function formatarAgora(agora: Date) {
   const data = agora.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' });
-  return `Hoje, ${data.replace(/ de /g, ' ')} ${formatarHora(agora)}`;
+  return `Hoje, ${data.replace(/ de /g, ' ')} • ${formatarHora(agora)}`;
 }
 
 export function TopBar() {

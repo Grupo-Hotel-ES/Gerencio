@@ -1,12 +1,16 @@
+import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Cartao, Divisor, Etiqueta, Texto } from './ui';
+import { Botao, Cartao, Divisor, Etiqueta, Texto } from './ui';
 
 import { Espacamento, Raio } from '@/constants/tokens';
 import { formatarReais, STATUS, type Pedido } from '@/data/pedidos';
 import { useCores } from '@/hooks/use-cores';
 
-export function OrderCard({ pedido, onAvancar }: { pedido: Pedido; onAvancar: () => void }) {
+export function OrderCard({ pedido, onAvancar, onCancelar, ocupado = false }: {
+  pedido: Pedido; onAvancar: () => void; onCancelar: () => void; ocupado?: boolean;
+}) {
+  const [confirmarCancelamento, setConfirmarCancelamento] = useState(false);
   const cores = useCores();
   const status = STATUS[pedido.status];
   const corStatus = cores[status.cor];
@@ -22,6 +26,8 @@ export function OrderCard({ pedido, onAvancar }: { pedido: Pedido; onAvancar: ()
         </Texto>
         <Etiqueta rotulo={pedido.canal} corPonto={cores.textoSecundario} />
       </View>
+
+      <Texto tamanho={13} cor="textoSecundario">{pedido.restaurante}</Texto>
 
       <View style={styles.linha}>
         <Texto tamanho={16} peso={500}>
@@ -56,6 +62,8 @@ export function OrderCard({ pedido, onAvancar }: { pedido: Pedido; onAvancar: ()
       <Pressable
         accessibilityRole="button"
         onPress={onAvancar}
+        disabled={ocupado}
+        accessibilityState={{ disabled: ocupado }}
         style={({ pressed }) => [
           styles.botao,
           primario
@@ -64,9 +72,16 @@ export function OrderCard({ pedido, onAvancar }: { pedido: Pedido; onAvancar: ()
           pressed && styles.pressionado,
         ]}>
         <Texto peso={500} cor={primario ? 'textOnBrand' : 'textoPrincipal'}>
-          {status.acao}
+          {ocupado ? 'Salvando…' : status.acao}
         </Texto>
       </Pressable>
+      {pedido.status !== 'saiu_para_entrega' && (confirmarCancelamento ? (
+        <View style={styles.itens}>
+          <Texto>{pedido.status === 'novo' ? 'Cancelar este pedido?' : 'Cancelar este pedido e devolver as unidades reservadas ao estoque?'}</Texto>
+          <Botao rotulo="Confirmar cancelamento" disabled={ocupado} onPress={onCancelar} />
+          <Botao rotulo="Manter pedido" disabled={ocupado} onPress={() => setConfirmarCancelamento(false)} />
+        </View>
+      ) : <Botao rotulo="Cancelar pedido" disabled={ocupado} onPress={() => setConfirmarCancelamento(true)} />)}
     </Cartao>
   );
 }
