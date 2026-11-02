@@ -1,0 +1,37 @@
+@baseUrl = http://localhost:3006/api
+
+### 1. Configuração (configurado: false sem STRIPE_SECRET_KEY no backend/.env)
+GET {{baseUrl}}/pagamentos/config
+
+###
+
+### 2. Gerar link de pagamento do pedido 1 (cartão ou Pix)
+# Chamar de novo devolve o mesmo link enquanto ele estiver pendente e válido.
+# Com clienteId, só gera se o pedido for daquele cliente (é o que o chatbot envia).
+POST {{baseUrl}}/pagamentos/pedidos/1/link
+Content-Type: application/json
+
+{
+  "clienteId": 1
+}
+
+###
+
+### 3. Pagamentos do pedido 1 (pago: true depois do webhook ou da página de retorno)
+GET {{baseUrl}}/pagamentos/pedidos/1
+
+###
+
+### 4. Sessão de checkout da assinatura (painel)
+POST {{baseUrl}}/pagamentos/checkout
+Content-Type: application/json
+
+{
+  "metodo": "pix",
+  "email": "teste@geroncio.dev",
+  "urlRetorno": "http://localhost:8081/assinatura/pagamento",
+  "estabelecimento": "Vila Bistrô",
+  "razaoSocial": "Vila Bistrô Alimentação Ltda.",
+  "cnpj": "12.345.678/0001-90",
+  "responsavel": "Marina Almeida"
+}

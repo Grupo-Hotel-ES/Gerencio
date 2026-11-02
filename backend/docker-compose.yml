@@ -95,5 +95,109 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # Stripe Checkout: assinatura do Gerêncio e links de pagamento de pedidos (chatbot).
+  # Sem STRIPE_SECRET_KEY no backend/.env, responde "não configurado" e o frontend
+  # fica em modo demonstração.
+  api-pagamentos:
+    <<: *api-common
+    container_name: geroncio-api-pagamentos
+    build:
+      context: .
+      dockerfile: ./api-pagamentos/Dockerfile
+    ports:
+      - "3006:3006"
+    environment:
+      <<: *api-env
+      PORT: 3006
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      PLANO_VALOR_CENTAVOS: ${PLANO_VALOR_CENTAVOS:-14900}
+      # Para onde o cliente volta depois de pagar o link do pedido (precisa abrir no celular dele)
+      PAGAMENTOS_URL_PUBLICA: ${PAGAMENTOS_URL_PUBLICA:-http://localhost:3006}
+      PAGAMENTO_PEDIDO_VALIDADE_MINUTOS: ${PAGAMENTO_PEDIDO_VALIDADE_MINUTOS:-60}
+      # Aviso de pagamento confirmado no WhatsApp (Evolution sobe com `pnpm chatbot`)
+      EVOLUTION_URL: http://evolution-api:8080
+      EVOLUTION_INSTANCIA: ${EVOLUTION_INSTANCIA:-geroncio}
+      AUTHENTICATION_API_KEY: ${AUTHENTICATION_API_KEY:-}
+
+  # Workflows do chatbot. Usa o SQLite interno do n8n (volume próprio) para não
+  # criar tabelas no banco do Prisma. Dentro da rede do compose, as APIs ficam
+  # em http://api-<nome>:<porta>/api (ex.: http://api-pedidos:3002/api).
+  # Os serviços do chatbot (chatbot, evolution-api e llm) ficam no profile
+  # "chatbot": não sobem com `pnpm backend:docker`, só com `pnpm chatbot`.
+  chatbot:
+    container_name: geroncio-chatbot
+    profiles: [chatbot]
+    restart: unless-stopped
+    build:
+      context: ./chatbot
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+      # O workflow lê estas variáveis com $env (ver chatbot/workflows/).
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:4b}
+      CHATBOT_RESTAURANTE_ID: ${CHATBOT_RESTAURANTE_ID:-1}
+    volumes:
+      - geroncio_n8ndata:/home/node/.n8n
+
+  # API do WhatsApp usada pelo chatbot. As tabelas dela ficam no schema
+  # "evolution" do mesmo Postgres, separadas do schema "public" do Prisma.
+  # DOCKER_ENV=true faz o entrypoint usar estas variáveis em vez de procurar
+  # um .env dentro do container.
+  evolution-api:
+    container_name: evolution_api
+    profiles: [chatbot]
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      DOCKER_ENV: "true"
+      SERVER_URL: ${EVOLUTION_SERVER_URL:-http://localhost:8080}
+      AUTHENTICATION_API_KEY: ${AUTHENTICATION_API_KEY:?defina AUTHENTICATION_API_KEY no backend/.env}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:-geroncio}:${POSTGRES_PASSWORD:-geroncio_dev}@postgres:5432/${POSTGRES_DB:-geroncio}?schema=evolution
+      DATABASE_CONNECTION_CLIENT_NAME: evolution
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+    volumes:
+      - evolution_instances:/evolution/instances
+
+  # LLM local do chatbot. O modelo vem de OLLAMA_MODEL e é baixado na primeira
+  # subida (fica no volume). O n8n acessa em http://llm:11434 (nó "Ollama").
+  # Para usar GPU NVIDIA, suba com `pnpm chatbot:up:gpu` em backend/.
+  llm:
+    container_name: geroncio-llm
+    profiles: [chatbot]
+    restart: unless-stopped
+    build:
+      context: ./llm
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:4b}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-24h}
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-8192}
+    volumes:
+      - geroncio_ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama show \"$$OLLAMA_MODEL\" >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10m
+
 volumes:
   geroncio_pgdata:
+  geroncio_n8ndata:
+  evolution_instances:
+  geroncio_ollama:

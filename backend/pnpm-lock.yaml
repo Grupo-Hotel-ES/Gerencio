@@ -242,6 +242,28 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  api-funcionarios:
+    dependencies:
+      '@geroncio/shared-db':
+        specifier: workspace:*
+        version: link:../packages/shared-db
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+    devDependencies:
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.2
+      tsx:
+        specifier: ^4.23.13
+        version: 4.23.13
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   api-integracao:
     dependencies:
       '@geroncio/shared-db':
@@ -250,6 +272,31 @@ importers:
       express:
         specifier: ^5.2.1
         version: 5.2.1
+    devDependencies:
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.2
+      tsx:
+        specifier: ^4.23.13
+        version: 4.23.13
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  api-pagamentos:
+    dependencies:
+      '@geroncio/shared-db':
+        specifier: workspace:*
+        version: link:../packages/shared-db
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+      stripe:
+        specifier: ^23.1.0
+        version: 23.1.0(@types/node@22.20.2)
     devDependencies:
       '@types/express':
         specifier: ^5.0.6
@@ -809,6 +856,15 @@ packages:
     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
     engines: {node: '>= 0.8'}
 
+  stripe@23.1.0:
+    resolution: {integrity: sha512-fVUfMSfTPoukfoV//MUKAx2+YxyKmYaYtnAL9VkfnHfaPNQylFdWZMD+zgUFerI8rjbaiER8Vzj2XEUQ2AhAsQ==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@types/node': '>=20'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
+
   toidentifier@1.0.1:
     resolution: {integrity: sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA==}
     engines: {node: '>=0.6'}
@@ -1307,6 +1363,10 @@ snapshots:
       side-channel-weakmap: 1.0.2
 
   statuses@2.0.2: {}
+
+  stripe@23.1.0(@types/node@22.20.2):
+    optionalDependencies:
+      '@types/node': 22.20.2
 
   toidentifier@1.0.1: {}
 

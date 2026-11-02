@@ -1,10 +1,24 @@
 import { Router } from 'express'
-import { db, parseId, StatusPedido, ErroOperacao, prepararItensPedido, mudarStatusPedido } from '@geroncio/shared-db'
+import {
+  db,
+  parseId,
+  StatusPedido,
+  ErroOperacao,
+  prepararItensPedido,
+  mudarStatusPedido,
+  cotarFreteRestaurante,
+} from '@geroncio/shared-db'
 
 const routes = Router()
-const incluirPedido = { itens: { include: { produto: true } }, entrega: { include: { entregador: true } }, restaurante: true } as const
+const incluirPedido = {
+  itens: { include: { produto: true } },
+  entrega: { include: { entregador: true } },
+  restaurante: true,
+  // Links de pagamento online (api-pagamentos), do mais recente para o mais antigo
+  pagamentos: { select: { status: true, expiraEm: true }, orderBy: { criadoEm: 'desc' } },
+} as const
 
-// 1. LISTAR PEDIDOS (opcionalmente filtrando por status: ?status=novo,em_preparo)
+// 1. LISTAR PEDIDOS (opcionalmente filtrando por status e cliente: ?status=novo,em_preparo&clienteId=1)
 routes.get('/pedidos', async (req, res) => {
   const filtro = typeof req.query.status === 'string' ? req.query.status.split(',') : []
   const restauranteId = req.query.restauranteId === undefined ? undefined : parseId(String(req.query.restauranteId))
@@ -22,9 +36,22 @@ routes.get('/pedidos', async (req, res) => {
     return
   }
 
+  let clienteId: number | null = null
+  if (req.query.clienteId !== undefined) {
+    clienteId = parseId(String(req.query.clienteId))
+    if (clienteId === null) {
+      res.status(400).json({ error: 'clienteId inválido' })
+      return
+    }
+  }
+
   try {
     const pedidos = await db.pedido.findMany({
-      where: { ...(status.length > 0 && { status: { in: status } }), ...(restauranteId && { restauranteId }) },
+      where: {
+        ...(status.length > 0 && { status: { in: status } }),
+        ...(restauranteId && { restauranteId }),
+        ...(clienteId !== null && { clienteId }),
+      },
       include: incluirPedido,
       orderBy: { id: 'desc' },
     })
@@ -34,7 +61,61 @@ routes.get('/pedidos', async (req, res) => {
   }
 })
 
-// 2. BUSCAR PEDIDO POR ID
+// 2. COTAÇÃO DE FRETE POR ROTA VIÁRIA (PRÉ-VISUALIZAÇÃO PARA ATENDIMENTO VIA WHATSAPP)
+routes.post('/pedidos/cotacao-frete', async (req, res) => {
+  const {
+    restauranteId,
+    enderecoDestino,
+    cepDestino,
+    cidadeDestino,
+    latitude,
+    longitude,
+  } = req.body
+
+  const idRestaurante = parseId(restauranteId !== undefined ? String(restauranteId) : undefined)
+  if (idRestaurante === null) {
+    res.status(400).json({ error: 'restauranteId válido é obrigatório' })
+    return
+  }
+
+  const temCoordenadas =
+    latitude !== undefined &&
+    latitude !== null &&
+    longitude !== undefined &&
+    longitude !== null &&
+    !isNaN(Number(latitude)) &&
+    !isNaN(Number(longitude))
+
+  if (!temCoordenadas && !enderecoDestino && !cepDestino) {
+    res.status(400).json({
+      error: 'Informe o enderecoDestino e/ou cepDestino (ou latitude e longitude) para calcular a rota',
+    })
+    return
+  }
+
+  try {
+    const cotacao = await cotarFreteRestaurante(idRestaurante, {
+      enderecoDestino,
+      cepDestino,
+      cidadeDestino,
+      latitude: temCoordenadas ? Number(latitude) : null,
+      longitude: temCoordenadas ? Number(longitude) : null,
+    })
+
+    res.json(cotacao)
+  } catch (error: any) {
+    if (error.message === 'Restaurante não encontrado') {
+      res.status(404).json({ error: error.message })
+      return
+    }
+    res.status(400).json({
+      error: 'Não foi possível calcular a rota e a taxa de entrega',
+      detalhe: error.message,
+    })
+  }
+})
+
+// 3. BUSCAR PEDIDO POR ID
 routes.get('/pedidos/:id', async (req, res) => {
   const id = parseId(req.params.id)
   if (id === null) {
@@ -57,7 +138,7 @@ routes.get('/pedidos/:id', async (req, res) => {
   }
 })
 
-// 3. CRIAR PEDIDO
+// 4. CRIAR PEDIDO (COM CÁLCULO E REGISTRO DA TAXA DE ENTREGA E DISTÂNCIA VIÁRIA PARA WHATSAPP)
 routes.post('/pedidos', async (req, res) => {
   const {
     nomeCliente,
@@ -72,12 +153,22 @@ routes.post('/pedidos', async (req, res) => {
     itens,
     entregadorId,
     custoEntrega,
+    distanciaKm,
     restauranteId,
   } = req.body
 
-  if (typeof metodoPagamento !== 'string' || !metodoPagamento.trim() || typeof app !== 'string' || !app.trim() ||
-      typeof enderecoDestino !== 'string' || !enderecoDestino.trim() || typeof cepDestino !== 'string') {
-    res.status(400).json({ error: 'Informe método de pagamento, canal, endereço ou retirada e CEP (vazio para retirada)' })
+  if (
+    typeof metodoPagamento !== 'string' ||
+    !metodoPagamento.trim() ||
+    typeof app !== 'string' ||
+    !app.trim() ||
+    typeof enderecoDestino !== 'string' ||
+    !enderecoDestino.trim() ||
+    typeof cepDestino !== 'string'
+  ) {
+    res.status(400).json({
+      error: 'Informe método de pagamento, canal, endereço ou retirada e CEP (vazio para retirada)',
+    })
     return
   }
 
@@ -87,51 +178,117 @@ routes.post('/pedidos', async (req, res) => {
   }
 
   try {
+    let latitudeFinal = latitude === undefined || latitude === null ? null : Number(latitude)
+    let longitudeFinal = longitude === undefined || longitude === null ? null : Number(longitude)
+    let custoEntregaFinal =
+      custoEntrega === undefined || custoEntrega === null ? undefined : Number(custoEntrega)
+    let distanciaKmFinal =
+      distanciaKm === undefined || distanciaKm === null ? undefined : Number(distanciaKm)
+
+    const canal = app.trim().toLowerCase()
+    const ehWhatsapp = canal === 'whatsapp'
+    const ehRetirada = !cepDestino.trim() || enderecoDestino.trim().toLowerCase() === 'retirada no local'
+
+    // Para pedidos de entrega via WhatsApp, calcula automaticamente a distância pelas vias
+    // e a taxa segundo as regras do restaurante (nos outros apps, o frete já vem definido pela plataforma).
+    if (ehWhatsapp && !ehRetirada && (custoEntregaFinal === undefined || distanciaKmFinal === undefined)) {
+      let idRest = restauranteId ? Number(restauranteId) : null
+
+      if (!idRest) {
+        const primeiroItem = itens[0] as { produtoId?: number } | undefined
+        if (primeiroItem?.produtoId) {
+          const produto = await db.produto.findUnique({
+            where: { id: Number(primeiroItem.produtoId) },
+            select: { restauranteId: true },
+          })
+          idRest = produto?.restauranteId ?? null
+        }
+      }
+
+      if (idRest) {
+        const cotacao = await cotarFreteRestaurante(idRest, {
+          enderecoDestino,
+          cepDestino,
+          latitude: latitudeFinal,
+          longitude: longitudeFinal,
+        })
+
+        if (!cotacao.dentroDaAreaEntrega || cotacao.taxaEntrega === null) {
+          res.status(400).json({
+            error: cotacao.motivoRecusa ?? 'Endereço fora da área de entrega do restaurante',
+            distanciaKm: cotacao.distanciaKm,
+          })
+          return
+        }
+
+        if (distanciaKmFinal === undefined) {
+          distanciaKmFinal = cotacao.distanciaKm
+        }
+        if (custoEntregaFinal === undefined) {
+          custoEntregaFinal = cotacao.taxaEntrega
+        }
+        if (latitudeFinal === null) {
+          latitudeFinal = cotacao.destino.latitude
+        }
+        if (longitudeFinal === null) {
+          longitudeFinal = cotacao.destino.longitude
+        }
+      }
+    }
+
+    const deveCriarEntrega =
+      entregadorId !== undefined ||
+      custoEntregaFinal !== undefined ||
+      distanciaKmFinal !== undefined
+
     const pedido = await db.$transaction(async (tx) => {
-      const restaurante = restauranteId === undefined ? undefined : parseId(restauranteId)
+      const restaurante = restauranteId === undefined ? undefined : parseId(String(restauranteId))
       if (restaurante === null) throw new ErroOperacao(400, 'restauranteId inválido')
       const preparados = await prepararItensPedido(tx, itens, restaurante)
-      const canal = app.trim().toLowerCase()
       // Nos pedidos manuais o valor vem do catálogo, sem confiar no total enviado pela tela.
       const total = ['balcao', 'whatsapp'].includes(canal) ? preparados.preco : Number(preco)
       if (!Number.isFinite(Number(total)) || Number(total) < 0 || Number(total) > 99_999_999.99) {
         throw new ErroOperacao(400, 'Preço do pedido inválido')
       }
       return tx.pedido.create({
-      data: {
-        restauranteId: preparados.restauranteId,
-        nomeCliente: nomeCliente || null,
-        clienteId: clienteId ? Number(clienteId) : null,
-        preco: total,
-        metodoPagamento,
-        app: canal,
-        enderecoDestino,
-        cepDestino,
-        latitude: latitude === undefined ? null : Number(latitude),
-        longitude: longitude === undefined ? null : Number(longitude),
-        itens: {
-          create: preparados.itens,
-        },
-        ...(entregadorId && {
-          entrega: {
-            create: {
-              entregadorId: Number(entregadorId),
-              custoEntrega: custoEntrega ? Number(custoEntrega) : 0,
-            },
+        data: {
+          restauranteId: preparados.restauranteId,
+          nomeCliente: nomeCliente || null,
+          clienteId: clienteId ? Number(clienteId) : null,
+          preco: total,
+          metodoPagamento,
+          app: canal,
+          enderecoDestino,
+          cepDestino,
+          latitude: latitudeFinal,
+          longitude: longitudeFinal,
+          itens: {
+            create: preparados.itens,
           },
-        }),
-      },
-      include: incluirPedido,
+          ...(deveCriarEntrega && {
+            entrega: {
+              create: {
+                ...(entregadorId && { entregadorId: Number(entregadorId) }),
+                ...(distanciaKmFinal !== undefined && { distanciaKm: distanciaKmFinal }),
+                custoEntrega: custoEntregaFinal !== undefined ? custoEntregaFinal : 0,
+              },
+            },
+          }),
+        },
+        include: incluirPedido,
       })
     })
     res.status(201).json(pedido)
   } catch (error: any) {
-    if (error instanceof ErroOperacao) { res.status(error.status).json({ error: error.message }); return }
+    if (error instanceof ErroOperacao) {
+      res.status(error.status).json({ error: error.message })
+      return
+    }
     res.status(500).json({ error: 'Erro ao criar pedido', detalhe: error.message })
   }
 })
 
-// 4. ATUALIZAR STATUS DO PEDIDO
+// 5. ATUALIZAR STATUS DO PEDIDO
 routes.patch('/pedidos/:id/status', async (req, res) => {
   const id = parseId(req.params.id)
   const { status } = req.body
@@ -154,15 +311,18 @@ routes.patch('/pedidos/:id/status', async (req, res) => {
     })
     res.json(pedido)
   } catch (error: any) {
-    if (error instanceof ErroOperacao) { res.status(error.status).json({ error: error.message }); return }
+    if (error instanceof ErroOperacao) {
+      res.status(error.status).json({ error: error.message })
+      return
+    }
     res.status(500).json({ error: 'Erro ao atualizar status', detalhe: error.message })
   }
 })
 
-// 5. ATRIBUIR / ATUALIZAR ENTREGADOR DO PEDIDO
+// 6. ATRIBUIR / ATUALIZAR ENTREGADOR DO PEDIDO
 routes.patch('/pedidos/:id/entregador', async (req, res) => {
   const id = parseId(req.params.id)
-  const { entregadorId, custoEntrega } = req.body
+  const { entregadorId, custoEntrega, distanciaKm } = req.body
 
   if (id === null || !entregadorId) {
     res.status(400).json({ error: 'Id do pedido e entregadorId são obrigatórios' })
@@ -181,11 +341,13 @@ routes.patch('/pedidos/:id/entregador', async (req, res) => {
       update: {
         entregadorId: Number(entregadorId),
         ...(custoEntrega !== undefined && { custoEntrega: Number(custoEntrega) }),
+        ...(distanciaKm !== undefined && { distanciaKm: Number(distanciaKm) }),
       },
       create: {
         pedidoId: id,
         entregadorId: Number(entregadorId),
-        custoEntrega: custoEntrega ? Number(custoEntrega) : 0,
+        custoEntrega: custoEntrega !== undefined ? Number(custoEntrega) : 0,
+        ...(distanciaKm !== undefined && { distanciaKm: Number(distanciaKm) }),
       },
       include: { entregador: true },
     })
@@ -196,7 +358,7 @@ routes.patch('/pedidos/:id/entregador', async (req, res) => {
   }
 })
 
-// 6. DELETAR PEDIDO
+// 7. DELETAR PEDIDO
 routes.delete('/pedidos/:id', async (req, res) => {
   const id = parseId(req.params.id)
   if (id === null) {
@@ -214,7 +376,9 @@ routes.delete('/pedidos/:id', async (req, res) => {
     // Pedidos aceitos precisam ser cancelados antes de apagar, para devolver o estoque.
     const removido = await db.pedido.deleteMany({ where: { id, estoqueBaixado: false } })
     if (removido.count === 0) {
-      res.status(409).json({ error: 'Cancele o pedido antes de excluir. Pedidos entregues devem ser preservados' })
+      res.status(409).json({
+        error: 'Cancele o pedido antes de excluir. Pedidos entregues devem ser preservados',
+      })
       return
     }
     res.status(204).send()
@@ -223,7 +387,7 @@ routes.delete('/pedidos/:id', async (req, res) => {
   }
 })
 
-// 7. RELATÓRIO DE VENDAS DO PERÍODO
+// 8. RELATÓRIO DE VENDAS DO PERÍODO
 // GET /relatorios/vendas?inicio=AAAA-MM-DD&fim=AAAA-MM-DD (datas no fuso do restaurante, inclusivas)
 
 // Pedidos que já saíram da cozinha contam como concluídos; cancelados e em andamento ficam de fora.
@@ -254,7 +418,10 @@ routes.get('/relatorios/vendas', async (req, res) => {
   const inicio = parseDia(req.query.inicio)
   const fim = parseDia(req.query.fim)
   const restauranteId = req.query.restauranteId === undefined ? undefined : parseId(String(req.query.restauranteId))
-  if (restauranteId === null) { res.status(400).json({ error: 'restauranteId inválido' }); return }
+  if (restauranteId === null) {
+    res.status(400).json({ error: 'restauranteId inválido' })
+    return
+  }
 
   if (!inicio || !fim || inicio > fim) {
     res.status(400).json({ error: 'inicio e fim são obrigatórios, no formato AAAA-MM-DD, com inicio <= fim' })
