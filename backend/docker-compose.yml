@@ -95,22 +95,30 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  # Assinatura do Gerêncio via Stripe Checkout. Sem STRIPE_SECRET_KEY no
-  # backend/.env, responde "não configurado" e o frontend fica em modo demonstração.
+  # Stripe Checkout: assinatura do Gerêncio e links de pagamento de pedidos (chatbot).
+  # Sem STRIPE_SECRET_KEY no backend/.env, responde "não configurado" e o frontend
+  # fica em modo demonstração.
   api-pagamentos:
+    <<: *api-common
     container_name: geroncio-api-pagamentos
-    restart: unless-stopped
     build:
       context: .
       dockerfile: ./api-pagamentos/Dockerfile
     ports:
       - "3006:3006"
     environment:
-      NODE_ENV: production
+      <<: *api-env
       PORT: 3006
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       PLANO_VALOR_CENTAVOS: ${PLANO_VALOR_CENTAVOS:-14900}
+      # Para onde o cliente volta depois de pagar o link do pedido (precisa abrir no celular dele)
+      PAGAMENTOS_URL_PUBLICA: ${PAGAMENTOS_URL_PUBLICA:-http://localhost:3006}
+      PAGAMENTO_PEDIDO_VALIDADE_MINUTOS: ${PAGAMENTO_PEDIDO_VALIDADE_MINUTOS:-60}
+      # Aviso de pagamento confirmado no WhatsApp (Evolution sobe com `pnpm chatbot`)
+      EVOLUTION_URL: http://evolution-api:8080
+      EVOLUTION_INSTANCIA: ${EVOLUTION_INSTANCIA:-geroncio}
+      AUTHENTICATION_API_KEY: ${AUTHENTICATION_API_KEY:-}
 
   # Workflows do chatbot. Usa o SQLite interno do n8n (volume próprio) para não
   # criar tabelas no banco do Prisma. Dentro da rede do compose, as APIs ficam

@@ -29,6 +29,13 @@ enum TipoFuncionario {
   CAIXA
 }
 
+enum StatusPagamento {
+  pendente
+  pago
+  expirado
+  falhou
+}
+
 enum StatusEventoIntegracao {
   pendente
   processando
@@ -155,6 +162,7 @@ model Pedido {
   itens           ItemPedido[]
   entrega         Entrega?
   eventosIntegracao EventoIntegracao[]
+  pagamentos      PagamentoPedido[]
 
   @@unique([app, pedidoExternoId])
   @@index([restauranteId, status])
@@ -185,6 +193,23 @@ model EventoIntegracao {
   @@unique([plataforma, eventoId])
   @@unique([plataforma, pedidoIdExterno, tipo])
   @@index([status, proximaTentativaEm])
+}
+
+/// Link de pagamento online de um pedido (sessão do Stripe Checkout).
+/// O status é atualizado pelo webhook do Stripe e pela página de retorno.
+model PagamentoPedido {
+  id             Int             @id @default(autoincrement())
+  pedidoId       Int             @map("pedido_id")
+  pedido         Pedido          @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  sessaoStripeId String          @unique @map("sessao_stripe_id")
+  url            String
+  valor          Decimal         @db.Decimal(10, 2)
+  status         StatusPagamento @default(pendente)
+  expiraEm       DateTime        @map("expira_em")
+  pagoEm         DateTime?       @map("pago_em")
+  criadoEm       DateTime        @default(now()) @map("criado_em")
+
+  @@index([pedidoId, status])
 }
 
 model ItemPedido {

@@ -1,5 +1,6 @@
 import {
   formatarHora,
+  type SituacaoPagamento,
   STATUS_ATIVOS,
   type Pedido,
   type StatusAtivo,
@@ -21,7 +22,23 @@ type PedidoApi = {
   itens: { quantidade: number; produto: { nome: string } }[];
   entrega: { entregador: { nome: string } | null } | null;
   restaurante: { id: number; nome: string } | null;
+  metodoPagamento: string;
+  pagamentos?: { status: 'pendente' | 'pago' | 'expirado' | 'falhou'; expiraEm: string }[];
 };
+
+const METODOS: Record<string, string> = { dinheiro: 'Dinheiro', pix: 'Pix', cartao: 'Cartão', online: 'Online' };
+const CANAIS_PROPRIOS = ['whatsapp', 'balcao'];
+
+function situacaoPagamento(pedido: PedidoApi): SituacaoPagamento {
+  const pagamentos = pedido.pagamentos ?? [];
+  if (pagamentos.some((p) => p.status === 'pago')) return { tipo: 'pago', rotulo: 'Pago online' };
+  // Sem webhook, o status pode continuar "pendente" depois de vencer: confere a validade também
+  if (pagamentos.some((p) => p.status === 'pendente' && new Date(p.expiraEm) > new Date())) {
+    return { tipo: 'aguardando', rotulo: 'Aguardando pagamento' };
+  }
+  if (pedido.metodoPagamento === 'online') return { tipo: 'online_pendente', rotulo: 'Pagamento online pendente' };
+  return { tipo: 'na_entrega', rotulo: `Pagamento: ${METODOS[pedido.metodoPagamento] ?? pedido.metodoPagamento}` };
+}
 
 // O campo `app` chega como identificador da plataforma (ex.: "ubereats").
 const CANAIS: Record<string, string> = {
@@ -52,6 +69,8 @@ function converter(pedido: PedidoApi): Pedido {
       : `Entrega • ${pedido.enderecoDestino}`,
     status: pedido.status as StatusAtivo,
     total: Number(pedido.preco),
+    pagamento: situacaoPagamento(pedido),
+    aceitaLinkPagamento: CANAIS_PROPRIOS.includes(pedido.app.toLowerCase()),
   };
 }
 

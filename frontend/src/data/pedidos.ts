@@ -13,6 +13,12 @@ export type StatusPedido =
 export const STATUS_ATIVOS = ['novo', 'em_preparo', 'pronto', 'saiu_para_entrega'] as const satisfies StatusPedido[];
 export type StatusAtivo = (typeof STATUS_ATIVOS)[number];
 
+/** Situação do pagamento exibida no cartão do pedido. */
+export type SituacaoPagamento = {
+  tipo: 'pago' | 'aguardando' | 'online_pendente' | 'na_entrega';
+  rotulo: string;
+};
+
 export type Pedido = {
   numero: number;
   restaurante: string;
@@ -23,6 +29,16 @@ export type Pedido = {
   entrega: string;
   status: StatusAtivo;
   total: number;
+  pagamento: SituacaoPagamento;
+  /** Pedidos próprios (WhatsApp, balcão) podem receber link de pagamento; os das plataformas não. */
+  aceitaLinkPagamento: boolean;
+};
+
+export const COR_PAGAMENTO: Record<SituacaoPagamento['tipo'], keyof CoresTema> = {
+  pago: 'statusEntregue',
+  aguardando: 'statusPreparando',
+  online_pendente: 'statusPronto',
+  na_entrega: 'textoSecundario',
 };
 
 export const STATUS: Record<
