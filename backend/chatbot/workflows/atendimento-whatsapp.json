@@ -341,7 +341,7 @@
         300
       ],
       "parameters": {
-        "jsCode": "// Monta a requisição para o Ollama: instruções + histórico da conversa.\n// O campo format restringe a resposta ao JSON { acao, dados }.\nconst estado = $input.first().json\n\nconst FORMATO = {\n  type: 'object',\n  properties: {\n    acao: {\n      type: 'string',\n      enum: ['MENSAGEM', 'CARDAPIO', 'RESUMIR_PEDIDO', 'CONFIRMAR_PEDIDO', 'CONSULTAR_PEDIDO'],\n    },\n    dados: {\n      type: 'object',\n      properties: {\n        texto: { type: 'string' },\n        itens: {\n          type: 'array',\n          items: {\n            type: 'object',\n            properties: { produtoId: { type: 'integer' }, quantidade: { type: 'integer' } },\n            required: ['produtoId', 'quantidade'],\n          },\n        },\n        endereco: { type: 'string' },\n        cep: { type: 'string' },\n        pagamento: { type: 'string', enum: ['dinheiro', 'pix', 'cartao'] },\n        pedidoId: { type: 'integer' },\n      },\n    },\n  },\n  required: ['acao', 'dados'],\n}\n\nconst real = (valor) => `R$ ${Number(valor).toFixed(2).replace('.', ',')}`\nconst pendente = estado.pedidoPendente\n  ? estado.pedidoPendente.itens.map((i) => `${i.quantidade}x ${i.nome}`).join(', ') +\n    ` (total ${real(estado.pedidoPendente.total)})`\n  : 'nenhum'\n\nconst instrucoes = `Você é o atendente virtual do restaurante ${estado.restauranteNome} no WhatsApp. Atenda os clientes em português do Brasil, com mensagens curtas, simpáticas e informais.\n\nVocê não fala direto com o cliente: cada resposta sua é um JSON com UMA ação, que o sistema executa. Responda sempre no formato {\"acao\": \"...\", \"dados\": {...}}.\n\nAÇÕES\n- MENSAGEM: envia dados.texto ao cliente pelo WhatsApp e encerra a sua vez. Use para responder, perguntar ou pedir confirmação.\n  Exemplo: {\"acao\": \"MENSAGEM\", \"dados\": {\"texto\": \"Oi! Quer ver o cardápio?\"}}\n- CARDAPIO: consulta os produtos e preços atuais.\n  Exemplo: {\"acao\": \"CARDAPIO\", \"dados\": {}}\n- RESUMIR_PEDIDO: monta o pedido e calcula o total. Precisa dos itens (produtoId do cardápio e quantidade), endereço, CEP e forma de pagamento (dinheiro, pix ou cartao, sempre paga na entrega). Depois mostre o resumo ao cliente com MENSAGEM e pergunte se pode confirmar.\n  Exemplo: {\"acao\": \"RESUMIR_PEDIDO\", \"dados\": {\"itens\": [{\"produtoId\": 1, \"quantidade\": 2}], \"endereco\": \"Rua das Flores, 10\", \"cep\": \"12345-000\", \"pagamento\": \"pix\"}}\n- CONFIRMAR_PEDIDO: cria o pedido que foi resumido. Só use depois que o cliente disser que confirma o resumo.\n  Exemplo: {\"acao\": \"CONFIRMAR_PEDIDO\", \"dados\": {}}\n- CONSULTAR_PEDIDO: consulta o status de um pedido do cliente. dados.pedidoId é opcional; sem ele, consulta o último pedido.\n  Exemplo: {\"acao\": \"CONSULTAR_PEDIDO\", \"dados\": {}}\n\nO resultado de cada ação volta para você numa mensagem que começa com \"--- RESULTADO <AÇÃO> ---\". Essas mensagens vêm do sistema, não do cliente: o cliente não as vê.\n\nREGRAS\n- Você NÃO sabe o que o restaurante vende até usar CARDAPIO. Se o cliente perguntar o que tem, pedir o cardápio, perguntar preço ou quiser fazer um pedido, use CARDAPIO primeiro e só então responda com MENSAGEM, citando os itens e preços exatamente como vieram.\n- Nunca invente produtos, preços, prazos ou status. Repasse o status do pedido exatamente como veio.\n- Não presuma dados que o cliente não informou (como a forma de pagamento): pergunte.\n- Use apenas produtoId que apareceram no cardápio.\n- Se faltar alguma informação do pedido, pergunte ao cliente com MENSAGEM.\n- Se uma ação devolver erro, corrija e tente de novo, ou explique o problema ao cliente.\n- Para assuntos que não sejam do restaurante, diga com educação que só pode ajudar com pedidos.\n\nCONTEXTO\n- Agora: ${$now.setZone('America/Sao_Paulo').toFormat('dd/MM/yyyy HH:mm')}\n- Nome do cliente: ${estado.nomeCliente ?? 'desconhecido'}\n- Pedido aguardando confirmação: ${pendente}\n- Último pedido: ${estado.ultimoPedidoId ? '#' + estado.ultimoPedidoId : 'nenhum'}`\n\nreturn [{\n  json: {\n    ...estado,\n    requisicao: {\n      model: $env.OLLAMA_MODEL,\n      stream: false,\n      think: false,\n      format: FORMATO,\n      options: { temperature: 0.3 },\n      messages: [{ role: 'system', content: instrucoes }, ...estado.historico],\n    },\n  },\n}]\n"
+        "jsCode": "// Monta a requisição para o Ollama: instruções + histórico da conversa.\n// O campo format restringe a resposta ao JSON { acao, dados }.\nconst estado = $input.first().json\n\nconst FORMATO = {\n  type: 'object',\n  properties: {\n    acao: {\n      type: 'string',\n      enum: ['MENSAGEM', 'CARDAPIO', 'RESUMIR_PEDIDO', 'CONFIRMAR_PEDIDO', 'CONSULTAR_PEDIDO', 'LINK_PAGAMENTO'],\n    },\n    dados: {\n      type: 'object',\n      properties: {\n        texto: { type: 'string' },\n        itens: {\n          type: 'array',\n          items: {\n            type: 'object',\n            properties: { produtoId: { type: 'integer' }, quantidade: { type: 'integer' } },\n            required: ['produtoId', 'quantidade'],\n          },\n        },\n        endereco: { type: 'string' },\n        cep: { type: 'string' },\n        pagamento: { type: 'string', enum: ['dinheiro', 'pix', 'cartao', 'online'] },\n        pedidoId: { type: 'integer' },\n      },\n    },\n  },\n  required: ['acao', 'dados'],\n}\n\nconst real = (valor) => `R$ ${Number(valor).toFixed(2).replace('.', ',')}`\nconst pendente = estado.pedidoPendente\n  ? estado.pedidoPendente.itens.map((i) => `${i.quantidade}x ${i.nome}`).join(', ') +\n    ` (total ${real(estado.pedidoPendente.total)})`\n  : 'nenhum'\n\nconst instrucoes = `Você é o atendente virtual do restaurante ${estado.restauranteNome} no WhatsApp. Atenda os clientes em português do Brasil, com mensagens curtas, simpáticas e informais.\n\nVocê não fala direto com o cliente: cada resposta sua é um JSON com UMA ação, que o sistema executa. Responda sempre no formato {\"acao\": \"...\", \"dados\": {...}}.\n\nAÇÕES\n- MENSAGEM: envia dados.texto ao cliente pelo WhatsApp e encerra a sua vez. Use para responder, perguntar ou pedir confirmação.\n  Exemplo: {\"acao\": \"MENSAGEM\", \"dados\": {\"texto\": \"Oi! Quer ver o cardápio?\"}}\n- CARDAPIO: consulta os produtos e preços atuais.\n  Exemplo: {\"acao\": \"CARDAPIO\", \"dados\": {}}\n- RESUMIR_PEDIDO: monta o pedido e calcula o total. Precisa dos itens (produtoId do cardápio e quantidade), endereço, CEP e forma de pagamento: dinheiro, pix ou cartao (pagos na entrega) ou online (o cliente paga agora por um link, com cartão ou Pix). Depois mostre o resumo ao cliente com MENSAGEM e pergunte se pode confirmar.\n  Exemplo: {\"acao\": \"RESUMIR_PEDIDO\", \"dados\": {\"itens\": [{\"produtoId\": 1, \"quantidade\": 2}], \"endereco\": \"Rua das Flores, 10\", \"cep\": \"12345-000\", \"pagamento\": \"pix\"}}\n- CONFIRMAR_PEDIDO: cria o pedido que foi resumido. Só use depois que o cliente disser que confirma o resumo.\n  Exemplo: {\"acao\": \"CONFIRMAR_PEDIDO\", \"dados\": {}}\n- CONSULTAR_PEDIDO: consulta o status de um pedido do cliente. dados.pedidoId é opcional; sem ele, consulta o último pedido.\n  Exemplo: {\"acao\": \"CONSULTAR_PEDIDO\", \"dados\": {}}\n- LINK_PAGAMENTO: gera o link de pagamento online (cartão ou Pix) de um pedido já confirmado do cliente. dados.pedidoId é opcional; sem ele, usa o último pedido. O sistema anexa o link sozinho à sua próxima MENSAGEM: não escreva o link.\n  Exemplo: {\"acao\": \"LINK_PAGAMENTO\", \"dados\": {}}\n\nO resultado de cada ação volta para você numa mensagem que começa com \"--- RESULTADO <AÇÃO> ---\". Essas mensagens vêm do sistema, não do cliente: o cliente não as vê.\n\nREGRAS\n- Você NÃO sabe o que o restaurante vende até usar CARDAPIO. Se o cliente perguntar o que tem, pedir o cardápio, perguntar preço ou quiser fazer um pedido, use CARDAPIO primeiro e só então responda com MENSAGEM, citando os itens e preços exatamente como vieram.\n- Nunca invente produtos, preços, prazos ou status. Repasse o status do pedido exatamente como veio.\n- Não presuma dados que o cliente não informou (como a forma de pagamento): pergunte.\n- Use apenas produtoId que apareceram no cardápio.\n- Quando o pagamento for online, depois de CONFIRMAR_PEDIDO use LINK_PAGAMENTO. Também use LINK_PAGAMENTO se o cliente pedir o link de novo ou quiser pagar online um pedido já feito.\n- Nunca escreva links ou URLs na mensagem: o sistema envia o link de pagamento.\n- Se faltar alguma informação do pedido, pergunte ao cliente com MENSAGEM.\n- Se uma ação devolver erro, corrija e tente de novo, ou explique o problema ao cliente.\n- Para assuntos que não sejam do restaurante, diga com educação que só pode ajudar com pedidos.\n\nCONTEXTO\n- Agora: ${$now.setZone('America/Sao_Paulo').toFormat('dd/MM/yyyy HH:mm')}\n- Nome do cliente: ${estado.nomeCliente ?? 'desconhecido'}\n- Pedido aguardando confirmação: ${pendente}\n- Último pedido: ${estado.ultimoPedidoId ? '#' + estado.ultimoPedidoId : 'nenhum'}`\n\nreturn [{\n  json: {\n    ...estado,\n    requisicao: {\n      model: $env.OLLAMA_MODEL,\n      stream: false,\n      think: false,\n      format: FORMATO,\n      options: { temperature: 0.3 },\n      messages: [{ role: 'system', content: instrucoes }, ...estado.historico],\n    },\n  },\n}]\n"
       }
     },
     {
@@ -533,6 +533,30 @@
               },
               "renameOutput": true,
               "outputKey": "REPETIR"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ac35e7f7-4444-4b1e-a869-6f74fe14e7d3",
+                    "leftValue": "={{ $json.acao }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "LINK_PAGAMENTO"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "LINK_PAGAMENTO"
             }
           ]
         },
@@ -569,7 +593,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ number: $json.jid, text: $json.dados.texto }) }}",
+        "jsonBody": "={{ JSON.stringify({ number: $json.jid, text: $json.dados.texto + ($json.linkPagamento ? '\\n\\n' + $json.linkPagamento : '') }) }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },
@@ -665,7 +689,7 @@
         400
       ],
       "parameters": {
-        "jsCode": "// Valida o pedido proposto pela LLM e calcula o total com os preços do banco\nconst estado = { ...$('Interpretar ação').first().json }\nconst { itens = [], endereco = '', cep = '', pagamento = '' } = estado.dados\nconst produtos = new Map($input.all().map((item) => item.json).filter((p) => p.id).map((p) => [p.id, p]))\nconst real = (valor) => `R$ ${Number(valor).toFixed(2).replace('.', ',')}`\n\nconst erros = []\nconst quantidades = new Map()\nfor (const item of itens) {\n  const id = Number(item.produtoId)\n  const quantidade = Number(item.quantidade)\n  if (!produtos.has(id)) erros.push(`produtoId ${item.produtoId} não existe no cardápio`)\n  else if (!Number.isInteger(quantidade) || quantidade < 1) erros.push(`quantidade inválida para o produtoId ${id}`)\n  else quantidades.set(id, (quantidades.get(id) ?? 0) + quantidade)\n}\nif (itens.length === 0) erros.push('nenhum item informado')\nif (!endereco.trim()) erros.push('endereço não informado')\nif (cep.replace(/\\D/g, '').length !== 8) erros.push('CEP inválido (precisa ter 8 dígitos)')\nif (!['dinheiro', 'pix', 'cartao'].includes(pagamento)) erros.push('forma de pagamento deve ser dinheiro, pix ou cartao')\n\nif (erros.length) {\n  return [{ json: { ...estado, resultado: `Erro: não foi possível montar o pedido: ${erros.join('; ')}.` } }]\n}\n\nconst linhas = [...quantidades].map(([id, quantidade]) => ({\n  produtoId: id,\n  nome: produtos.get(id).nome,\n  quantidade,\n  precoUnitario: Number(produtos.get(id).preco),\n}))\nconst total = linhas.reduce((soma, l) => soma + l.precoUnitario * l.quantidade, 0)\n\n// confirmavel vira true quando o cliente responder (ver \"Montar contexto\")\nestado.pedidoPendente = { itens: linhas, endereco: endereco.trim(), cep, pagamento, total, confirmavel: false }\n\nconst resultado = [\n  'Pedido montado (ainda NÃO confirmado):',\n  ...linhas.map((l) => `- ${l.quantidade}x ${l.nome} (${real(l.precoUnitario)} cada)`),\n  `Total: ${real(total)}`,\n  `Entrega: ${endereco.trim()}, CEP ${cep}`,\n  `Pagamento na entrega: ${pagamento}`,\n  'Mostre este resumo ao cliente com MENSAGEM e pergunte se pode confirmar.',\n].join('\\n')\n\nreturn [{ json: { ...estado, resultado } }]\n"
+        "jsCode": "// Valida o pedido proposto pela LLM e calcula o total com os preços do banco\nconst estado = { ...$('Interpretar ação').first().json }\nconst { itens = [], endereco = '', cep = '', pagamento = '' } = estado.dados\nconst produtos = new Map($input.all().map((item) => item.json).filter((p) => p.id).map((p) => [p.id, p]))\nconst real = (valor) => `R$ ${Number(valor).toFixed(2).replace('.', ',')}`\n\nconst erros = []\nconst quantidades = new Map()\nfor (const item of itens) {\n  const id = Number(item.produtoId)\n  const quantidade = Number(item.quantidade)\n  if (!produtos.has(id)) erros.push(`produtoId ${item.produtoId} não existe no cardápio`)\n  else if (!Number.isInteger(quantidade) || quantidade < 1) erros.push(`quantidade inválida para o produtoId ${id}`)\n  else quantidades.set(id, (quantidades.get(id) ?? 0) + quantidade)\n}\nif (itens.length === 0) erros.push('nenhum item informado')\nif (!endereco.trim()) erros.push('endereço não informado')\nif (cep.replace(/\\D/g, '').length !== 8) erros.push('CEP inválido (precisa ter 8 dígitos)')\nif (!['dinheiro', 'pix', 'cartao', 'online'].includes(pagamento)) erros.push('forma de pagamento deve ser dinheiro, pix, cartao ou online')\n\nif (erros.length) {\n  return [{ json: { ...estado, resultado: `Erro: não foi possível montar o pedido: ${erros.join('; ')}.` } }]\n}\n\nconst linhas = [...quantidades].map(([id, quantidade]) => ({\n  produtoId: id,\n  nome: produtos.get(id).nome,\n  quantidade,\n  precoUnitario: Number(produtos.get(id).preco),\n}))\nconst total = linhas.reduce((soma, l) => soma + l.precoUnitario * l.quantidade, 0)\n\n// confirmavel vira true quando o cliente responder (ver \"Montar contexto\")\nestado.pedidoPendente = { itens: linhas, endereco: endereco.trim(), cep, pagamento, total, confirmavel: false }\n\nconst resultado = [\n  'Pedido montado (ainda NÃO confirmado):',\n  ...linhas.map((l) => `- ${l.quantidade}x ${l.nome} (${real(l.precoUnitario)} cada)`),\n  `Total: ${real(total)}`,\n  `Entrega: ${endereco.trim()}, CEP ${cep}`,\n  pagamento === 'online' ? 'Pagamento: online, por link (cartão ou Pix), enviado após a confirmação' : `Pagamento na entrega: ${pagamento}`,\n  'Mostre este resumo ao cliente com MENSAGEM e pergunte se pode confirmar.',\n].join('\\n')\n\nreturn [{ json: { ...estado, resultado } }]\n"
       }
     },
     {
@@ -801,7 +825,7 @@
         560
       ],
       "parameters": {
-        "jsCode": "const estado = { ...$('Validar confirmação').first().json }\nconst pedido = $input.first().json\ndelete estado.ok\ndelete estado.corpoPedido\n\nif (!pedido.id) {\n  const detalhe = pedido.error?.message ?? pedido.error ?? 'erro desconhecido'\n  return [{ json: { ...estado, resultado: `Erro ao criar o pedido: ${detalhe}. Peça desculpas ao cliente.` } }]\n}\n\nestado.clienteId = pedido.clienteId ?? estado.clienteId\nestado.ultimoPedidoId = pedido.id\nestado.pedidoPendente = null\n\nreturn [{\n  json: {\n    ...estado,\n    resultado: `Pedido #${pedido.id} criado com sucesso e recebido pelo restaurante. Avise o cliente com o número do pedido.`,\n  },\n}]\n"
+        "jsCode": "const estado = { ...$('Validar confirmação').first().json }\nconst pedido = $input.first().json\ndelete estado.ok\ndelete estado.corpoPedido\n\nif (!pedido.id) {\n  const detalhe = pedido.error?.message ?? pedido.error ?? 'erro desconhecido'\n  return [{ json: { ...estado, resultado: `Erro ao criar o pedido: ${detalhe}. Peça desculpas ao cliente.` } }]\n}\n\nconst online = estado.pedidoPendente?.pagamento === 'online'\nestado.clienteId = pedido.clienteId ?? estado.clienteId\nestado.ultimoPedidoId = pedido.id\nestado.pedidoPendente = null\n\nconst resultado = online\n  ? `Pedido #${pedido.id} criado com sucesso. O pagamento é online: use LINK_PAGAMENTO agora para gerar o link.`\n  : `Pedido #${pedido.id} criado com sucesso e recebido pelo restaurante. Avise o cliente com o número do pedido.`\n\nreturn [{ json: { ...estado, resultado } }]\n"
       }
     },
     {
@@ -834,6 +858,45 @@
       ],
       "parameters": {
         "jsCode": "const estado = $('Interpretar ação').first().json\nconst pedidos = $input.all().map((item) => item.json).filter((p) => p.id)\nconst real = (valor) => `R$ ${Number(valor).toFixed(2).replace('.', ',')}`\nconst STATUS = {\n  novo: 'recebido, aguardando o restaurante começar o preparo',\n  em_preparo: 'em preparo',\n  pronto: 'pronto, aguardando o entregador',\n  saiu_para_entrega: 'saiu para entrega',\n  entregue: 'entregue',\n  cancelado: 'cancelado',\n}\n\nconst pedidoId = estado.dados.pedidoId ?? estado.ultimoPedidoId\nconst pedido = pedidoId ? pedidos.find((p) => p.id === Number(pedidoId)) : pedidos[0]\n\nlet resultado\nif (!pedidos.length) resultado = 'Este cliente ainda não tem pedidos.'\nelse if (!pedido) resultado = `Erro: o pedido #${pedidoId} não existe ou não é deste cliente.`\nelse {\n  const itens = pedido.itens.map((i) => `${i.quantidade}x ${i.produto?.nome ?? 'item'}`).join(', ')\n  const feitoEm = DateTime.fromISO(pedido.criadoEm).setZone('America/Sao_Paulo').toFormat('dd/MM HH:mm')\n  resultado = `Pedido #${pedido.id} (feito em ${feitoEm}): ${STATUS[pedido.status] ?? pedido.status}. Itens: ${itens}. Total: ${real(pedido.preco)}.`\n}\n\nreturn [{ json: { ...estado, resultado } }]\n"
+      }
+    },
+    {
+      "id": "479d145f-fc5e-4a78-9db3-0b6c00ec5af6",
+      "name": "Gerar link de pagamento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        1000
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://api-pagamentos:3006/api/pagamentos/pedidos/{{ $json.dados.pedidoId ?? $json.ultimoPedidoId ?? 0 }}/link",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ clienteId: $json.clienteId ?? 0 }) }}"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "91331e76-c283-4bf2-a485-f7fa435c3113",
+      "name": "Resultado do link",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        1000
+      ],
+      "parameters": {
+        "jsCode": "// O link não passa pela LLM: fica em linkPagamento e o \"Enviar WhatsApp\" o anexa à mensagem\nconst estado = { ...$('Interpretar ação').first().json }\nconst resposta = $input.first().json\nconst real = (valor) => `R$ ${Number(valor).toFixed(2).replace('.', ',')}`\nconst pedidoId = estado.dados.pedidoId ?? estado.ultimoPedidoId\n\nif (!pedidoId) {\n  return [{ json: { ...estado, resultado: 'Erro: este cliente não tem pedido. Monte e confirme um pedido antes.' } }]\n}\n\nif (!resposta.url) {\n  const detalhe = typeof resposta.error === 'string' ? resposta.error : resposta.error?.message ?? 'erro desconhecido'\n  return [{ json: { ...estado, resultado: `Erro ao gerar o link de pagamento do pedido #${pedidoId}: ${detalhe}.` } }]\n}\n\nconst validoAte = DateTime.fromISO(resposta.expiraEm).setZone('America/Sao_Paulo').toFormat('HH:mm')\nestado.linkPagamento = resposta.url\n\nreturn [{\n  json: {\n    ...estado,\n    resultado: `Link de pagamento do pedido #${resposta.pedidoId} gerado: ${real(resposta.valor)}, cartão ou Pix, válido até ${validoAte}. Avise o cliente com MENSAGEM que o link segue abaixo (o sistema anexa o link; não escreva a URL).`,\n  },\n}]"
       }
     }
   ],
@@ -1064,6 +1127,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Gerar link de pagamento",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1214,6 +1284,28 @@
       ]
     },
     "Resumir status": {
+      "main": [
+        [
+          {
+            "node": "Registrar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar link de pagamento": {
+      "main": [
+        [
+          {
+            "node": "Resultado do link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resultado do link": {
       "main": [
         [
           {

@@ -17,6 +17,7 @@ import {
   type StatusPedido,
 } from '@/data/pedidos';
 import { useCores } from '@/hooks/use-cores';
+import { buscarConfigPagamento } from '@/services/api-pagamentos';
 import { atualizarStatus, listarPedidosAtivos } from '@/services/api-pedidos';
 import { listarRestaurantes, type Restaurante } from '@/services/api-produtos';
 
@@ -50,6 +51,7 @@ export default function DashboardDePedidos() {
   const [restauranteId, setRestauranteId] = useState<number>();
   const [novoPedido, setNovoPedido] = useState(false);
   const [ocupados, setOcupados] = useState<number[]>([]);
+  const [pagamentoOnline, setPagamentoOnline] = useState(false);
   const operacoes = useRef(new Set<number>());
   const consulta = useRef(0);
 
@@ -61,6 +63,11 @@ export default function DashboardDePedidos() {
     atualizar();
     const intervalo = setInterval(atualizar, INTERVALO_ATUALIZACAO_MS);
     return () => { ativo = false; clearInterval(intervalo); };
+  }, []);
+
+  // Só oferece link de pagamento quando o Stripe está configurado na api-pagamentos
+  useEffect(() => {
+    buscarConfigPagamento().then((config) => setPagamentoOnline(config?.configurado ?? false));
   }, []);
 
   const carregar = useCallback(async () => {
@@ -244,6 +251,7 @@ export default function DashboardDePedidos() {
               onAvancar={() => alterar(pedido, STATUS[pedido.status].proximo)}
               onCancelar={() => alterar(pedido, 'cancelado')}
               ocupado={ocupados.includes(pedido.numero)}
+              pagamentoOnline={pagamentoOnline}
             />
           ))}
         </Grade>

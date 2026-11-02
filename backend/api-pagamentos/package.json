@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@geroncio/shared-db": "workspace:*",
     "express": "^5.2.1",
     "stripe": "^23.1.0"
   },

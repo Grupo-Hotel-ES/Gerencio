@@ -22,7 +22,7 @@ O Gerôncio centraliza pedidos de várias plataformas de delivery (iFood, Rappi,
 │   ├── api-restaurantes/   # :3003  CRUD de restaurantes
 │   ├── api-produtos/       # :3004  produtos e mapeamentos produto ↔ id externo da plataforma
 │   ├── api-integracao/     # :3005  webhooks/polling das plataformas de delivery
-│   ├── api-pagamentos/     # :3006  assinatura do Gerêncio via Stripe Checkout
+│   ├── api-pagamentos/     # :3006  Stripe Checkout: assinatura do Gerêncio e links de pagamento de pedidos
 │   ├── chatbot/            # :5678  n8n (workflows do chatbot)
 │   ├── llm/                # :11434 Ollama (LLM do chatbot)
 │   └── packages/shared-db/ # Prisma schema, migrations e cliente compartilhado
@@ -113,7 +113,8 @@ O atendimento pelo WhatsApp é o workflow `chatbot/workflows/atendimento-whatsap
 - **Debounce**: cada mensagem entra em `MensagemChatbot`, e depois de 4 s só a execução da mensagem mais recente do telefone segue, com todas as mensagens pendentes juntas.
 - **Sessão**: histórico, cliente, pedido pendente e último pedido ficam em `SessaoChatbot` (Prisma), lidos e gravados pelo nó Postgres.
 - **Loop**: a LLM responde sempre um JSON `{ "acao", "dados" }`, restrito pelo `format` do Ollama. O orquestrador executa a ação, devolve o resultado como mensagem `--- RESULTADO <AÇÃO> ---` e chama a LLM de novo, até `MENSAGEM` (que envia pelo WhatsApp e encerra) ou até 6 passos.
-- **Ações**: `MENSAGEM`, `CARDAPIO`, `RESUMIR_PEDIDO` (valida ids e calcula o total com os preços do banco), `CONFIRMAR_PEDIDO` (só depois de o cliente responder ao resumo) e `CONSULTAR_PEDIDO` (só pedidos do próprio cliente). Para criar uma ação, inclua-a no `enum` e nas instruções de "Preparar chamada" e numa saída do Switch "Ação".
+- **Ações**: `MENSAGEM`, `CARDAPIO`, `RESUMIR_PEDIDO` (valida ids e calcula o total com os preços do banco; pagamento `dinheiro`, `pix`, `cartao` ou `online`), `CONFIRMAR_PEDIDO` (só depois de o cliente responder ao resumo), `CONSULTAR_PEDIDO` (só pedidos do próprio cliente) e `LINK_PAGAMENTO` (gera o link do Stripe na `api-pagamentos`, só para pedidos do próprio cliente).
+- **Link de pagamento**: a URL do Stripe não passa pela LLM. O nó "Resultado do link" guarda em `linkPagamento` e o "Enviar WhatsApp" anexa o link ao fim da próxima `MENSAGEM`. Para criar uma ação, inclua-a no `enum` e nas instruções de "Preparar chamada" e numa saída do Switch "Ação".
 
 O restaurante atendido vem de `CHATBOT_RESTAURANTE_ID` (padrão 1). Depois de editar o JSON (ou exportá-lo do editor), rode `sh chatbot/importar-workflow.sh` em `backend/`: o script cria as credenciais (Postgres e Evolution, a partir do `.env`), importa, publica e reinicia o n8n.
 
@@ -123,7 +124,9 @@ O `api-pagamentos` cria sessões do **Stripe Checkout** para a assinatura (tela 
 
 - Para ativar, preencha `STRIPE_SECRET_KEY` (e `STRIPE_WEBHOOK_SECRET`) no `backend/.env`. Sem a chave, `GET /api/pagamentos/config` responde `configurado: false` e o frontend fica em modo demonstração.
 - O Pix precisa estar habilitado em *Settings → Payment methods* da conta Stripe (conta brasileira).
-- Webhook: `POST /api/webhooks/stripe` (assinatura validada com `STRIPE_WEBHOOK_SECRET`). Em desenvolvimento: `stripe listen --forward-to localhost:3006/api/webhooks/stripe`. Por enquanto os eventos só vão para o log; ainda não há modelo de assinatura no banco.
+- **Links de pedidos**: `POST /api/pagamentos/pedidos/:id/link` (corpo opcional `{ clienteId }`) cria uma sessão de pagamento avulso (cartão ou Pix) e grava em `PagamentoPedido`. Enquanto houver um link pendente e válido, devolve o mesmo. `GET /api/pagamentos/pedidos/:id` lista os pagamentos e diz se o pedido está pago. Depois de pagar, o cliente cai em `GET /api/pagamentos/retorno`, que também sincroniza o status. Para isso abrir no celular do cliente, `PAGAMENTOS_URL_PUBLICA` precisa ser uma URL pública. A validade do link vem de `PAGAMENTO_PEDIDO_VALIDADE_MINUTOS` (padrão 60; o Stripe aceita de 30 a 1440).
+- No painel, a `api-pedidos` devolve `pagamentos` (status e validade) em cada pedido, e o cartão mostra a situação do pagamento. Pedidos de WhatsApp e balcão têm o botão "Gerar link de pagamento", que mostra o link como QR Code (`components/dashboard/qr-code.tsx`, desenhado com Views a partir da lib `qrcode`). O botão só aparece com o Stripe configurado.
+- Webhook: `POST /api/webhooks/stripe` (assinatura validada com `STRIPE_WEBHOOK_SECRET`). Em desenvolvimento: `stripe listen --forward-to localhost:3006/api/webhooks/stripe`. Atualiza o `PagamentoPedido` (pago, expirado, falhou); os eventos da assinatura ainda só vão para o log, porque não há modelo de assinatura no banco.
 - No frontend, a URL vem de `EXPO_PUBLIC_API_PAGAMENTOS_URL`. No celular, o Stripe volta para a página web definida em `EXPO_PUBLIC_URL_RETORNO_PAGAMENTO`, e o app consulta o status ao fechar o navegador.
 
 ### Integração com plataformas

@@ -55,6 +55,26 @@ export function consultarCheckout(id: string) {
   return requisitarApi<SessaoCheckout>(BASE_URL, `/pagamentos/checkout/${encodeURIComponent(id)}`);
 }
 
+/** Link de pagamento de um pedido (tabela PagamentoPedido). `valor` chega como string. */
+export type LinkPagamentoPedido = {
+  id: number;
+  pedidoId: number;
+  url: string;
+  valor: string;
+  status: 'pendente' | 'pago' | 'expirado' | 'falhou';
+  expiraEm: string;
+  reaproveitado: boolean;
+};
+
+/** Gera (ou reaproveita, se ainda válido) o link de pagamento de cartão ou Pix do pedido. */
+export function gerarLinkPagamentoPedido(numero: number) {
+  return requisitarApi<LinkPagamentoPedido>(BASE_URL, `/pagamentos/pedidos/${numero}/link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+}
+
 /** Traduz o estado da sessão para a etapa exibida na tela. */
 export function resultadoDaSessao(sessao: SessaoCheckout): ResultadoPagamento {
   if (sessao.statusPagamento === 'paid' || sessao.statusPagamento === 'no_payment_required') return 'sucesso';
