@@ -65,9 +65,16 @@ export default function DashboardDePedidos() {
     return () => { ativo = false; clearInterval(intervalo); };
   }, []);
 
-  // Só oferece link de pagamento quando o Stripe está configurado na api-pagamentos
+  // Só oferece link de pagamento quando o Stripe está configurado na api-pagamentos.
+  // Confere de novo a cada atualização: a API pode subir (ou ganhar as chaves) com o painel aberto.
   useEffect(() => {
-    buscarConfigPagamento().then((config) => setPagamentoOnline(config?.configurado ?? false));
+    let ativo = true;
+    const atualizar = () => buscarConfigPagamento().then((config) => {
+      if (ativo) setPagamentoOnline(config?.configurado ?? false);
+    });
+    atualizar();
+    const intervalo = setInterval(atualizar, INTERVALO_ATUALIZACAO_MS);
+    return () => { ativo = false; clearInterval(intervalo); };
   }, []);
 
   const carregar = useCallback(async () => {

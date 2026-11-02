@@ -1,6 +1,7 @@
 import { Router, type Request } from 'express'
 import Stripe from 'stripe'
 import { db, parseId, StatusPagamento } from '@geroncio/shared-db'
+import { aoConfirmarPagamento } from './pedido-pago'
 
 export type RequestComCorpoBruto = Request & { corpoBruto?: Buffer }
 
@@ -54,10 +55,16 @@ async function sincronizarPagamentoPedido(sessao: Stripe.Checkout.Session) {
   else if (sessao.status === 'expired') status = StatusPagamento.expirado
 
   // updateMany: sessões da assinatura (sem pedido) simplesmente não casam com nenhuma linha
-  await db.pagamentoPedido.updateMany({
+  const alterados = await db.pagamentoPedido.updateMany({
     where: { sessaoStripeId: sessao.id, status: { not: StatusPagamento.pago } },
     data: { status, ...(status === StatusPagamento.pago && { pagoEm: new Date() }) },
   })
+
+  // Só na primeira vez que vira "pago": o webhook e a página de retorno podem chegar os dois
+  if (status === StatusPagamento.pago && alterados.count > 0) {
+    const pagamento = await db.pagamentoPedido.findUnique({ where: { sessaoStripeId: sessao.id } })
+    if (pagamento) await aoConfirmarPagamento(pagamento.pedidoId)
+  }
   return status
 }
 
