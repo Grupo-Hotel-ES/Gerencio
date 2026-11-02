@@ -21,6 +21,7 @@ const ICONES = {
   estoque: { ios: 'shippingbox', android: 'inventory_2', web: 'inventory_2' },
   relatorios: { ios: 'chart.bar', android: 'bar_chart', web: 'bar_chart' },
   rotas: { ios: 'arrow.triangle.swap', android: 'route', web: 'route' },
+  configuracoes: { ios: 'gearshape', android: 'settings', web: 'settings' },
   camadas: { ios: 'square.stack.3d.up', android: 'layers', web: 'layers' },
   ajuda: { ios: 'questionmark.circle', android: 'help', web: 'help' },
   sino: { ios: 'bell', android: 'notifications', web: 'notifications' },
@@ -38,6 +39,15 @@ const ICONES = {
   editar: { ios: 'pencil', android: 'edit', web: 'edit' },
   fechar: { ios: 'xmark', android: 'close', web: 'close' },
   usuario: { ios: 'person', android: 'person', web: 'person' },
+  cartao: { ios: 'creditcard', android: 'credit_card', web: 'credit_card' },
+  pix: { ios: 'qrcode', android: 'qr_code', web: 'qr_code' },
+  copiar: { ios: 'doc.on.doc', android: 'content_copy', web: 'content_copy' },
+  relogio: { ios: 'clock', android: 'schedule', web: 'schedule' },
+  chat: { ios: 'bubble.left', android: 'chat', web: 'chat' },
+  alerta: { ios: 'exclamationmark.circle', android: 'error_outline', web: 'error_outline' },
+  check: { ios: 'checkmark.circle', android: 'check_circle', web: 'check_circle' },
+  setaDireita: { ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' },
+  cadeado: { ios: 'lock', android: 'lock', web: 'lock' },
 } as const satisfies Record<string, SymbolViewProps['name']>;
 
 export type NomeIcone = keyof typeof ICONES;
@@ -122,26 +132,29 @@ type BotaoProps = Omit<PressableProps, 'style'> & {
   rotulo: string;
   icone?: NomeIcone;
   variante?: 'primario' | 'contorno';
+  disabled?: boolean;
   style?: StyleProp<ViewStyle>;
 };
 
-export function Botao({ rotulo, icone, variante = 'contorno', style, ...rest }: BotaoProps) {
+export function Botao({ rotulo, icone, variante = 'contorno', disabled, style, ...rest }: BotaoProps) {
   const cores = useCores();
   const primario = variante === 'primario';
   return (
     <Pressable
       accessibilityRole="button"
+      disabled={disabled}
       style={({ pressed }) => [
         styles.botao,
         primario
-          ? { backgroundColor: cores.brand, borderColor: cores.brand }
+          ? { backgroundColor: disabled ? cores.borda : cores.brand, borderColor: disabled ? cores.borda : cores.brand }
           : { backgroundColor: cores.superficie, borderColor: cores.borda },
-        pressed && styles.pressionado,
+        disabled && { opacity: 0.6 },
+        pressed && !disabled && styles.pressionado,
         style,
       ]}
       {...rest}>
-      {icone && <Icone nome={icone} cor={primario ? cores.textOnBrand : cores.textoPrincipal} />}
-      <Texto peso={500} cor={primario ? 'textOnBrand' : 'textoPrincipal'}>
+      {icone && <Icone nome={icone} cor={primario ? (disabled ? cores.textoSecundario : cores.textOnBrand) : cores.textoPrincipal} />}
+      <Texto peso={500} cor={primario ? (disabled ? 'textoSecundario' : 'textOnBrand') : 'textoPrincipal'}>
         {rotulo}
       </Texto>
     </Pressable>

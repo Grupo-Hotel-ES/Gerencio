@@ -1,10 +1,12 @@
+import { Link } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Icone, Texto } from './ui';
+import { Etiqueta, Icone, Texto } from './ui';
 
 import { Espacamento, Raio } from '@/constants/tokens';
 import { formatarHora } from '@/data/pedidos';
+import { usePerfil } from '@/data/perfil-context';
 import { useCores } from '@/hooks/use-cores';
 
 function formatarAgora(agora: Date) {
@@ -14,11 +16,12 @@ function formatarAgora(agora: Date) {
 
 export function TopBar() {
   const cores = useCores();
+  const { perfil, iniciais } = usePerfil();
+
   // Preenchido só no cliente para não divergir do HTML gerado na renderização estática.
   const [agora, setAgora] = useState<Date | null>(null);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- O relógio só começa após a hidratação do HTML estático.
     setAgora(new Date());
     const intervalo = setInterval(() => setAgora(new Date()), 30_000);
     return () => clearInterval(intervalo);
@@ -27,8 +30,12 @@ export function TopBar() {
   return (
     <View style={[styles.container, { backgroundColor: cores.superficie }]}>
       <Texto tamanho={16} peso={500}>
-        Gerôncio
+        {perfil.nomeRestaurante}
       </Texto>
+      <Etiqueta
+        rotulo={perfil.lojaAberta ? 'Loja aberta' : 'Loja fechada'}
+        corPonto={perfil.lojaAberta ? cores.statusEntregue : cores.statusCancelado}
+      />
 
       <View style={styles.direita}>
         <Texto tamanho={13} cor="textoSecundario">
@@ -37,11 +44,16 @@ export function TopBar() {
         <Pressable accessibilityRole="button" accessibilityLabel="Notificações">
           <Icone nome="sino" />
         </Pressable>
-        <View style={[styles.avatar, { backgroundColor: cores.brand }]}>
-          <Texto peso={600} cor="textOnBrand">
-            G
-          </Texto>
-        </View>
+        <Link href="/perfil" asChild>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Perfil de ${perfil.nomeCompleto}`}
+            style={StyleSheet.flatten([styles.avatar, { backgroundColor: cores.brand }])}>
+            <Texto peso={600} cor="textOnBrand">
+              {iniciais}
+            </Texto>
+          </Pressable>
+        </Link>
       </View>
     </View>
   );
@@ -67,5 +79,6 @@ const styles = StyleSheet.create({
     borderRadius: Raio.small,
     alignItems: 'center',
     justifyContent: 'center',
+    cursor: 'pointer' as any,
   },
 });

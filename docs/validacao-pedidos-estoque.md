@@ -30,7 +30,7 @@ As URLs padrão estão em `frontend/.env.example`. Para alterá-las, copie para 
 ## Validar pela tela
 
 1. Tenha pelo menos um restaurante cadastrado na API de restaurantes (`POST http://localhost:3003/api/restaurantes`). O dashboard ainda não tem formulário de cadastro de restaurante.
-2. Abra **Estoque**, escolha o restaurante e use **Cadastrar produto**. Informe nome, categoria, preço e quantidade inicial.
+2. Abra **Estoque**, escolha o restaurante e use **Cadastrar produto**. Informe nome, categoria, preço e quantidade inicial. A edição do produto abre em seguida: em **Códigos nas plataformas**, informe o código (SKU) que o produto tem em cada aplicativo, por exemplo `SKU-IFOOD-123`. Sem código, o produto não aparece no cardápio daquela plataforma no simulador e os pedidos dela não são reconhecidos. O botão **Editar** de cada produto permite mudar nome, categoria, preço e códigos, ou excluir o produto.
 3. Edite uma quantidade e clique em **Salvar ajustes**. Recarregue a página e confirme que o saldo permanece.
 4. Abra **Pedidos → Novo pedido**. Escolha restaurante, cliente, canal, pagamento, retirada ou entrega e produtos. O servidor calcula o preço dos pedidos de balcão/WhatsApp com o catálogo salvo.
 5. O pedido aparece como **Novo**, ainda sem baixar o saldo. Clique em **Aceitar pedido**: o status vira **Preparando** e as unidades são descontadas.

@@ -1,0 +1,11 @@
+# Override para rodar o Ollama na GPU NVIDIA (precisa do nvidia-container-toolkit).
+# Uso: pnpm chatbot:up:gpu (em backend/)
+services:
+  llm:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

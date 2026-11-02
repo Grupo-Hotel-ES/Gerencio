@@ -10,6 +10,15 @@ export type ProdutoEstoque = {
 
 export const CANAIS_CONECTADOS = ['WhatsApp', 'iFood', '99 Food', 'Uber Eats', 'Rappi', 'Keeta'];
 
+/** Plataformas em que o produto pode ter um código próprio. O `id` é o valor gravado no MapeamentoApp. */
+export const PLATAFORMAS_DELIVERY = [
+  { id: 'ifood', nome: 'iFood' },
+  { id: 'rappi', nome: 'Rappi' },
+  { id: 'ubereats', nome: 'Uber Eats' },
+  { id: '99food', nome: '99 Food' },
+  { id: 'keeta', nome: 'Keeta' },
+] as const;
+
 // Dados demonstrativos, iguais aos do protótipo: a api-produtos ainda não guarda quantidade nem categoria.
 export const ESTOQUE_DEMO: ProdutoEstoque[] = [
   { id: 1, nome: 'Hambúrguer da casa', categoria: 'Lanches', publicado: 18, quantidade: 16 },

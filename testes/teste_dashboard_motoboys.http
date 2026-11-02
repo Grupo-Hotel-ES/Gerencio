@@ -1,0 +1,388 @@
+# =============================================================
+# Testes HTTP — Dashboard de Gerenciamento de Motoboys
+# Serviço: api-pedidos (:3002)
+#
+# Contexto:
+#   O dashboard de motoboys consome duas grandes áreas do backend:
+#   (a) Entregadores (modelo Funcionario/Entrega) e
+#   (b) Pedidos vinculados ao entregador (status, atribuição).
+#
+#   O frontend atual usa dados demonstrativos (MOTOBOYS_DEMO)
+#   enquanto a integração real com a API ainda não foi conectada.
+#   Este arquivo testa as rotas já existentes no backend que
+#   sustentarão essa integração futura.
+#
+# Pré-requisitos:
+#   1. Banco Postgres rodando:  pnpm db  (na raiz)
+#   2. Microsserviços rodando:  pnpm backend  (na raiz)
+#   3. Ter ao menos 1 restaurante e 1 produto cadastrados.
+#      Use os arquivos testes_api-restaurantes.http e
+#      testes_api-produtos.http para criar registros de exemplo.
+# =============================================================
+
+@urlBase = http://localhost:3002/api
+
+# ------------------------------------------------------------------
+# BLOCO 1 — HEALTH CHECK
+# Verifica se o serviço api-pedidos está de pé antes de rodar
+# os demais cenários.
+# ------------------------------------------------------------------
+
+### 1.1. Health check do serviço de pedidos
+# Resposta esperada: 200 OK  { status: "ok" }
+GET http://localhost:3002/health
+
+###
+
+# ------------------------------------------------------------------
+# BLOCO 2 — LISTAR PEDIDOS (visão geral do dashboard)
+# O dashboard exibe o volume de pedidos por entregador; a listagem
+# geral é o ponto de partida para cruzar pedidos ↔ entregadores.
+# ------------------------------------------------------------------
+
+### 2.1. Listar todos os pedidos (sem filtros)
+# Resposta esperada: 200 OK  — array com todos os pedidos (pode ser vazio)
+GET {{urlBase}}/pedidos
+
+###
+
+### 2.2. Listar pedidos em trânsito (relevantes para o dashboard de motoboys)
+# Filtra pelos status que indicam que o pedido já saiu da cozinha
+# e está a cargo de um entregador.
+# Resposta esperada: 200 OK  — array de pedidos com status saiu_para_entrega
+GET {{urlBase}}/pedidos?status=saiu_para_entrega
+
+###
+
+### 2.3. Listar pedidos em múltiplos status (visão operacional do painel)
+# Resposta esperada: 200 OK  — array com pedidos "pronto" e "saiu_para_entrega"
+GET {{urlBase}}/pedidos?status=pronto,saiu_para_entrega
+
+###
+
+### 2.4. Listar pedidos filtrados por restaurante + status em entrega
+# Substitua o valor de restauranteId pelo id real do seu banco.
+# Resposta esperada: 200 OK  — pedidos do restaurante 1 que estão em rota
+GET {{urlBase}}/pedidos?restauranteId=1&status=saiu_para_entrega
+
+###
+
+### 2.5. Erro — status inválido informado na query
+# Resposta esperada: 400 Bad Request
+#   { "error": "status deve ser um de: novo, em_preparo, pronto, saiu_para_entrega, entregue, cancelado" }
+GET {{urlBase}}/pedidos?status=em_transito
+
+###
+
+### 2.6. Erro — restauranteId não numérico
+# Resposta esperada: 400 Bad Request  { "error": "restauranteId inválido" }
+GET {{urlBase}}/pedidos?restauranteId=abc
+
+###
+
+# ------------------------------------------------------------------
+# BLOCO 3 — ATRIBUIR ENTREGADOR A UM PEDIDO
+# Operação central do dashboard: vincular um motoboy a um pedido.
+# O modelo Entrega faz o upsert (cria ou atualiza o vínculo).
+# ------------------------------------------------------------------
+
+### 3.1. Atribuir entregador ao pedido (criação do vínculo — primeiro acesso)
+# Pré-requisito: pedido com id=1 deve existir no banco.
+# No schema, Funcionario.tipo = ENTREGADOR e Funcionario.status = disponivel.
+# Ajuste pedidoId e entregadorId conforme os ids reais do seu banco.
+# Resposta esperada: 200 OK — objeto Entrega com entregador incluído
+PATCH {{urlBase}}/pedidos/1/entregador
+Content-Type: application/json
+
+{
+  "entregadorId": 1,
+  "custoEntrega": 8.50
+}
+
+###
+
+### 3.2. Reatribuir entregador ao mesmo pedido (upsert — troca de motoboy)
+# Cenário: motoboy original ficou indisponível; outro assume a entrega.
+# O backend faz upsert: se já existe Entrega para o pedido, atualiza.
+# Resposta esperada: 200 OK — objeto Entrega com o novo entregadorId
+PATCH {{urlBase}}/pedidos/1/entregador
+Content-Type: application/json
+
+{
+  "entregadorId": 2,
+  "custoEntrega": 10.00
+}
+
+###
+
+### 3.3. Atribuir entregador sem informar custoEntrega (deve assumir 0)
+# Resposta esperada: 200 OK — objeto Entrega com custoEntrega = 0
+PATCH {{urlBase}}/pedidos/1/entregador
+Content-Type: application/json
+
+{
+  "entregadorId": 1
+}
+
+###
+
+### 3.4. Erro — pedido inexistente ao vincular entregador
+# Resposta esperada: 404 Not Found  { "error": "Pedido não encontrado" }
+PATCH {{urlBase}}/pedidos/99999/entregador
+Content-Type: application/json
+
+{
+  "entregadorId": 1,
+  "custoEntrega": 5.00
+}
+
+###
+
+### 3.5. Erro — id do pedido inválido (não numérico)
+# Resposta esperada: 400 Bad Request
+#   { "error": "Id do pedido e entregadorId são obrigatórios" }
+PATCH {{urlBase}}/pedidos/abc/entregador
+Content-Type: application/json
+
+{
+  "entregadorId": 1
+}
+
+###
+
+### 3.6. Erro — entregadorId ausente no corpo
+# Resposta esperada: 400 Bad Request
+#   { "error": "Id do pedido e entregadorId são obrigatórios" }
+PATCH {{urlBase}}/pedidos/1/entregador
+Content-Type: application/json
+
+{}
+
+###
+
+# ------------------------------------------------------------------
+# BLOCO 4 — ATUALIZAR STATUS DO PEDIDO (ciclo de entrega)
+# O dashboard mostra o ciclo de vida do pedido; o motoboy avança
+# o status de "pronto" → "saiu_para_entrega" → "entregue".
+# ------------------------------------------------------------------
+
+### 4.0.1. Avançar pedido para "em_preparo" (motoboy saiu com o pedido)
+# Resposta esperada: 200 OK — pedido com status "saiu_para_entrega"
+PATCH {{urlBase}}/pedidos/1/status
+Content-Type: application/json
+
+{
+  "status": "em_preparo"
+}
+
+###
+
+### 4.0.2. Avançar pedido para "em_preparo" (motoboy saiu com o pedido)
+# Resposta esperada: 200 OK — pedido com status "saiu_para_entrega"
+PATCH {{urlBase}}/pedidos/1/status
+Content-Type: application/json
+
+{
+  "status": "pronto"
+}
+
+###
+
+### 4.1. Avançar pedido para "saiu_para_entrega" (motoboy saiu com o pedido)
+# Resposta esperada: 200 OK — pedido com status "saiu_para_entrega"
+PATCH {{urlBase}}/pedidos/1/status
+Content-Type: application/json
+
+{
+  "status": "saiu_para_entrega"
+}
+
+###
+
+### 4.2. Avançar pedido para "entregue" (confirmação de entrega)
+# Resposta esperada: 200 OK — pedido com status "entregue"
+PATCH {{urlBase}}/pedidos/1/status
+Content-Type: application/json
+
+{
+  "status": "entregue"
+}
+
+###
+
+### 4.3. Cancelar pedido (entregador não conseguiu entregar)
+# Resposta esperada: 200 OK — pedido com status "cancelado"
+PATCH {{urlBase}}/pedidos/1/status
+Content-Type: application/json
+
+{
+  "status": "cancelado"
+}
+
+###
+
+### 4.4. Erro — transição de status inválida (direto de "novo" para "entregue")
+# O shared-db valida a máquina de estados. Espera rejeição se a transição
+# não for permitida pelo fluxo: novo→em_preparo→pronto→saiu_para_entrega→entregue.
+# Resposta esperada: 400 Bad Request ou 409 Conflict (depende da regra do mudarStatusPedido)
+PATCH {{urlBase}}/pedidos/1/status
+Content-Type: application/json
+
+{
+  "status": "entregue"
+}
+
+###
+
+### 4.5. Erro — status não reconhecido pelo sistema
+# Resposta esperada: 400 Bad Request
+#   { "error": "status deve ser um de: novo, em_preparo, pronto, saiu_para_entrega, entregue, cancelado" }
+PATCH {{urlBase}}/pedidos/1/status
+Content-Type: application/json
+
+{
+  "status": "a_caminho"
+}
+
+###
+
+### 4.6. Erro — pedido inexistente ao atualizar status
+# Resposta esperada: 404 Not Found (via ErroOperacao do mudarStatusPedido)
+PATCH {{urlBase}}/pedidos/99999/status
+Content-Type: application/json
+
+{
+  "status": "saiu_para_entrega"
+}
+
+###
+
+# ------------------------------------------------------------------
+# BLOCO 5 — BUSCAR PEDIDO POR ID (detalhe do pedido no dashboard)
+# O dashboard de motoboys exibe o pedido atribuído com todos os
+# detalhes (itens, entregador, restaurante).
+# ------------------------------------------------------------------
+
+### 5.1. Buscar pedido existente pelo id
+# Resposta esperada: 200 OK — objeto Pedido completo com entrega e entregador incluídos
+GET {{urlBase}}/pedidos/1
+
+###
+
+### 5.2. Erro — pedido não encontrado
+# Resposta esperada: 404 Not Found  { "error": "Pedido não encontrado" }
+GET {{urlBase}}/pedidos/99999
+
+###
+
+### 5.3. Erro — id não numérico
+# Resposta esperada: 400 Bad Request  { "error": "Id inválido" }
+GET {{urlBase}}/pedidos/motoboy
+
+###
+
+# ------------------------------------------------------------------
+# BLOCO 6 — CRIAR PEDIDO COM ENTREGADOR JÁ DEFINIDO
+# Cenário de pedido manual (balcão/WhatsApp) que já parte com
+# um motoboy atribuído desde a criação.
+# Pré-requisito: produto id=1 e entregador id=1 devem existir.
+# ------------------------------------------------------------------
+
+### 6.1. Criar pedido com entregador pré-atribuído (canal balcao)
+# O total é calculado pelo backend a partir do catálogo (não confiar no preco enviado).
+# Resposta esperada: 201 Created — pedido com entrega já vinculada
+POST {{urlBase}}/pedidos
+Content-Type: application/json
+
+{
+  "nomeCliente": "Ana Paula Mendes",
+  "restauranteId": 1,
+  "metodoPagamento": "dinheiro",
+  "app": "balcao",
+  "enderecoDestino": "Rua João Pessoa, 500",
+  "cepDestino": "12247004",
+  "latitude": -23.188,
+  "longitude": -45.884,
+  "itens": [
+    { "produtoId": 1, "quantidade": 1 }
+  ],
+  "entregadorId": 1,
+  "custoEntrega": 7.00
+}
+
+###
+
+### 6.2. Criar pedido sem entregador (será atribuído depois pelo dashboard)
+# Resposta esperada: 201 Created — pedido sem entrega vinculada (entrega: null)
+POST {{urlBase}}/pedidos
+Content-Type: application/json
+
+{
+  "nomeCliente": "Bruno Tavares",
+  "restauranteId": 1,
+  "metodoPagamento": "PIX",
+  "app": "ifood",
+  "enderecoDestino": "Av. Nove de Julho, 100",
+  "cepDestino": "01313000",
+  "latitude": -23.554,
+  "longitude": -46.662,
+  "preco": 42.90,
+  "itens": [
+    { "produtoId": 1, "quantidade": 2 }
+  ]
+}
+
+###
+
+# ------------------------------------------------------------------
+# BLOCO 7 — RELATÓRIO DE VENDAS POR PERÍODO
+# Usado pelo dashboard para calcular o total de entregas e receita
+# por entregador/canal em um determinado período.
+# ------------------------------------------------------------------
+
+### 7.1. Relatório do dia atual (janela de 1 dia)
+# Substitua as datas pelo dia em que estiver rodando o teste.
+# Resposta esperada: 200 OK — objeto com receitaTotal, pedidosConcluidos, etc.
+GET {{urlBase}}/relatorios/vendas?inicio=2026-10-26&fim=2026-10-26
+
+###
+
+### 7.2. Relatório da semana corrente
+# Resposta esperada: 200 OK — resumo da semana com receitaPorDia e receitaPorCanal
+GET {{urlBase}}/relatorios/vendas?inicio=2026-10-20&fim=2026-10-26
+
+###
+
+### 7.3. Relatório filtrado por restaurante específico
+# Resposta esperada: 200 OK — receita apenas do restaurante 1 no período
+GET {{urlBase}}/relatorios/vendas?inicio=2026-10-01&fim=2026-10-26&restauranteId=1
+
+###
+
+### 7.4. Erro — datas ausentes
+# Resposta esperada: 400 Bad Request
+#   { "error": "inicio e fim são obrigatórios, no formato AAAA-MM-DD, com inicio <= fim" }
+GET {{urlBase}}/relatorios/vendas
+
+###
+
+### 7.5. Erro — inicio maior que fim (intervalo invertido)
+# Resposta esperada: 400 Bad Request
+#   { "error": "inicio e fim são obrigatórios, no formato AAAA-MM-DD, com inicio <= fim" }
+GET {{urlBase}}/relatorios/vendas?inicio=2026-10-26&fim=2026-10-01
+
+###
+
+### 7.6. Erro — período superior a 366 dias
+# Resposta esperada: 400 Bad Request
+#   { "error": "O período deve ter no máximo 366 dias" }
+GET {{urlBase}}/relatorios/vendas?inicio=2025-01-01&fim=2026-12-31
+
+###
+
+### 7.7. Erro — restauranteId inválido no relatório
+# Resposta esperada: 400 Bad Request  { "error": "restauranteId inválido" }
+GET {{urlBase}}/relatorios/vendas?inicio=2026-10-01&fim=2026-10-26&restauranteId=xyz
+
+###
+

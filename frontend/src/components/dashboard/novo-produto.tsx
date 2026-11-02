@@ -7,7 +7,7 @@ import { Espacamento } from '@/constants/tokens';
 import { criarProduto, type Restaurante } from '@/services/api-produtos';
 
 export function FormularioProduto({ restaurantes, restauranteInicial, onConcluir, onFechar }: {
-  restaurantes: Restaurante[]; restauranteInicial?: number; onConcluir: (restauranteId: number) => void; onFechar: () => void;
+  restaurantes: Restaurante[]; restauranteInicial?: number; onConcluir: (restauranteId: number, produtoId: number) => void; onFechar: () => void;
 }) {
   const [restauranteId, setRestauranteId] = useState<number | undefined>(restauranteInicial ?? restaurantes[0]?.id);
   const [nome, setNome] = useState('');
@@ -28,8 +28,8 @@ export function FormularioProduto({ restaurantes, restauranteInicial, onConcluir
     }
     enviando.current = true; setSalvando(true); setErro(null);
     try {
-      await criarProduto({ nome: nome.trim(), categoria: categoria.trim() || 'Sem categoria', preco: valor, quantidade: saldo, restauranteId });
-      onConcluir(restauranteId);
+      const produto = await criarProduto({ nome: nome.trim(), categoria: categoria.trim() || 'Sem categoria', preco: valor, quantidade: saldo, restauranteId });
+      onConcluir(restauranteId, produto.id);
     } catch (e) { setErro((e as Error).message); }
     finally { enviando.current = false; setSalvando(false); }
   };
