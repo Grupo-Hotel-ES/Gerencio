@@ -3,7 +3,7 @@ import { requisitarApi } from './http';
 const BASE_URL = process.env.EXPO_PUBLIC_API_PRODUTOS_URL ?? 'http://localhost:3004';
 const RESTAURANTES_URL = process.env.EXPO_PUBLIC_API_RESTAURANTES_URL ?? 'http://localhost:3003/api';
 
-export type Restaurante = { id: number; nome: string };
+export type Restaurante = { id: number; nome: string; endereco?: string; cidade?: string };
 export type Produto = {
   id: number;
   nome: string;

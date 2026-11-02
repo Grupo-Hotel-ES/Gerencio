@@ -20,7 +20,7 @@ type PedidoApi = {
   status: StatusPedido;
   criadoEm: string;
   itens: { quantidade: number; produto: { nome: string } }[];
-  entrega: { entregador: { nome: string } | null } | null;
+  entrega: { custoEntrega: string; entregador: { nome: string } | null } | null;
   restaurante: { id: number; nome: string } | null;
   metodoPagamento: string;
   pagamentos?: { status: 'pendente' | 'pago' | 'expirado' | 'falhou'; expiraEm: string }[];
@@ -68,14 +68,16 @@ function converter(pedido: PedidoApi): Pedido {
       ? `Entrega própria • ${entregador}`
       : `Entrega • ${pedido.enderecoDestino}`,
     status: pedido.status as StatusAtivo,
-    total: Number(pedido.preco),
+    // O cliente paga itens + taxa de entrega (é o valor cobrado no link de pagamento)
+    total: Number(pedido.preco) + Number(pedido.entrega?.custoEntrega ?? 0),
+    taxaEntrega: Number(pedido.entrega?.custoEntrega ?? 0),
     pagamento: situacaoPagamento(pedido),
     aceitaLinkPagamento: CANAIS_PROPRIOS.includes(pedido.app.toLowerCase()),
   };
 }
 
-export async function requisitar<T>(caminho: string, init?: RequestInit): Promise<T> {
-  return requisitarApi<T>(BASE_URL, caminho, init);
+export async function requisitar<T>(caminho: string, init?: RequestInit, tempoLimiteMs?: number): Promise<T> {
+  return requisitarApi<T>(BASE_URL, caminho, init, tempoLimiteMs);
 }
 
 /** Pedidos ativos, incluindo os que estão em entrega, do mais recente para o mais antigo. */
@@ -92,7 +94,30 @@ export type NovoPedido = {
   enderecoDestino: string;
   cepDestino: string;
   itens: { produtoId: number; quantidade: number }[];
+  // Frete já cotado: sem ele, a api-pedidos calcula sozinha ao criar uma entrega
+  custoEntrega?: number;
+  distanciaKm?: number;
+  latitude?: number;
+  longitude?: number;
 };
+
+/** Cotação de entrega pela rota nas vias (api-pedidos). */
+export type CotacaoFrete = {
+  taxaEntrega: number | null;
+  distanciaKm: number;
+  duracaoEstimadaMinutos: number;
+  dentroDaAreaEntrega: boolean;
+  motivoRecusa?: string;
+  destino: { latitude: number; longitude: number };
+};
+
+export async function cotarFrete(restauranteId: number, enderecoDestino: string, cepDestino: string) {
+  return requisitar<CotacaoFrete>('/pedidos/cotacao-frete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ restauranteId, enderecoDestino, cepDestino }),
+  });
+}
 
 export async function criarPedido(dados: NovoPedido): Promise<void> {
   await requisitar('/pedidos', {

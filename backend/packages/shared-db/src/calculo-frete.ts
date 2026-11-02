@@ -329,6 +329,93 @@ export function calcularTaxaEntregaRestaurante(
 }
 
 /**
+ * Coordenadas do restaurante (origem das entregas). Geocodifica pelo endereço na primeira vez
+ * e salva latitude/longitude no cadastro para as próximas consultas.
+ */
+export async function obterCoordenadasRestaurante(restaurante: {
+  id: number
+  endereco: string
+  cep: string
+  cidade: string
+  latitude: number | null
+  longitude: number | null
+}): Promise<Coordenada> {
+  if (restaurante.latitude !== null && restaurante.longitude !== null) {
+    return { latitude: restaurante.latitude, longitude: restaurante.longitude }
+  }
+
+  // Mensagem própria: o problema é o cadastro do restaurante, não o endereço do cliente
+  const geo = await obterCoordenadasEndereco({
+    endereco: restaurante.endereco,
+    cep: restaurante.cep,
+    cidade: restaurante.cidade,
+  }).catch(() => {
+    throw new Error(
+      `Endereço do restaurante não localizado no mapa ("${restaurante.endereco}", CEP "${restaurante.cep}"). Corrija o cadastro ou informe latitude e longitude nas regras de entrega`,
+    )
+  })
+  const coordenada = { latitude: geo.latitude, longitude: geo.longitude }
+  await db.restaurante.update({ where: { id: restaurante.id }, data: coordenada })
+  return coordenada
+}
+
+export interface ResultadoRotaComParadas {
+  distanciaKm: number
+  duracaoMinutos: number
+  /** Traçado da rota como [latitude, longitude], na ordem do percurso. */
+  geometria: Array<[number, number]>
+  metodoCalculo: 'rota_viaria' | 'contingencia_haversine'
+}
+
+interface RespostaOsrmComGeometria {
+  code?: string
+  routes?: Array<{ distance: number; duration: number; geometry?: { coordinates: Array<[number, number]> } }>
+}
+
+/**
+ * Rota pelas vias passando por todos os pontos na ordem informada (OSRM, perfil de carro).
+ * Sem OSRM, liga os pontos em linha reta e estima com o fator viário da dissertação.
+ */
+export async function calcularRotaComParadas(pontos: Coordenada[]): Promise<ResultadoRotaComParadas> {
+  if (pontos.length < 2) throw new Error('A rota precisa de ao menos dois pontos')
+
+  try {
+    const coordenadasUrl = pontos.map((p) => `${p.longitude},${p.latitude}`).join(';')
+    const res = await fetch(`${OSRM_API_URL}/route/v1/driving/${coordenadasUrl}?overview=full&geometries=geojson`, {
+      headers: { 'User-Agent': 'Geroncio-Delivery-UNIFESP/1.0', Accept: 'application/json' },
+      signal: AbortSignal.timeout(TIMEOUT_HTTP_MS),
+    })
+    if (res.ok) {
+      const dados = (await res.json()) as RespostaOsrmComGeometria
+      const rota = dados.routes?.[0]
+      if (dados.code === 'Ok' && rota && rota.geometry) {
+        return {
+          distanciaKm: arredondar2Casas(rota.distance / 1000),
+          duracaoMinutos: Math.max(1, Math.round(rota.duration / 60)),
+          // O GeoJSON vem como [longitude, latitude]
+          geometria: rota.geometry.coordinates.map(([lon, lat]) => [lat, lon]),
+          metodoCalculo: 'rota_viaria',
+        }
+      }
+    }
+  } catch {
+    // Falha de rede no OSRM: segue para a estimativa
+  }
+
+  let distanciaKm = 0
+  for (let i = 0; i < pontos.length - 1; i++) {
+    distanciaKm += calcularDistanciaHaversineKm(pontos[i]!, pontos[i + 1]!, FATOR_CORRECAO_VIARIA_TESE)
+  }
+  distanciaKm = arredondar2Casas(distanciaKm)
+  return {
+    distanciaKm,
+    duracaoMinutos: Math.max(1, Math.round((distanciaKm / VELOCIDADE_MEDIA_URBANA_KMPH) * 60)),
+    geometria: pontos.map((p) => [p.latitude, p.longitude]),
+    metodoCalculo: 'contingencia_haversine',
+  }
+}
+
+/**
  * Fluxo completo de cotação de entrega para um restaurante e um endereço de destino:
  * 1. Identifica o endereço/coordenadas do restaurante (e salva em cache no banco se ainda não tinha lat/lon).
  * 2. Identifica/geocodifica o endereço de entrega do cliente.
@@ -345,23 +432,7 @@ export async function cotarFreteRestaurante(
   }
 
   // 1. Coordenadas de origem (Restaurante)
-  let coordOrigem: Coordenada
-  if (restaurante.latitude !== null && restaurante.longitude !== null) {
-    coordOrigem = { latitude: restaurante.latitude, longitude: restaurante.longitude }
-  } else {
-    const geoOrigem = await obterCoordenadasEndereco({
-      endereco: restaurante.endereco,
-      cep: restaurante.cep,
-      cidade: restaurante.cidade,
-    })
-    coordOrigem = { latitude: geoOrigem.latitude, longitude: geoOrigem.longitude }
-
-    // Salva as coordenadas geocodificadas no restaurante para acelerar próximas cotações
-    await db.restaurante.update({
-      where: { id: restaurante.id },
-      data: { latitude: coordOrigem.latitude, longitude: coordOrigem.longitude },
-    })
-  }
+  const coordOrigem = await obterCoordenadasRestaurante(restaurante)
 
   // 2. Coordenadas de destino (Cliente)
   let coordDestino: Coordenada

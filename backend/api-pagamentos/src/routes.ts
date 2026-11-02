@@ -248,6 +248,7 @@ routes.post('/pagamentos/pedidos/:id/link', async (req, res) => {
       include: {
         itens: { include: { produto: { select: { nome: true } } } },
         restaurante: { select: { nome: true } },
+        entrega: { select: { custoEntrega: true } },
         pagamentos: { orderBy: { criadoEm: 'desc' } },
       },
     })
@@ -264,15 +265,24 @@ routes.post('/pagamentos/pedidos/:id/link', async (req, res) => {
       return
     }
 
-    // Folga de 5 min para o cliente não receber um link prestes a expirar
+    // O cliente paga os itens (preco) mais a taxa de entrega calculada na criação do pedido
+    const itensCentavos = Math.round(Number(pedido.preco) * 100)
+    const freteCentavos = Math.round(Number(pedido.entrega?.custoEntrega ?? 0) * 100)
+    const totalCentavos = itensCentavos + freteCentavos
+
+    // Folga de 5 min para o cliente não receber um link prestes a expirar. Um link
+    // aberto com outro valor (ex.: gerado antes do frete entrar) é encerrado e refeito.
     const limite = new Date(Date.now() + 5 * 60 * 1000)
     const aberto = pedido.pagamentos.find((p) => p.status === StatusPagamento.pendente && p.expiraEm > limite)
-    if (aberto) {
+    if (aberto && Math.round(Number(aberto.valor) * 100) === totalCentavos) {
       res.json({ ...aberto, reaproveitado: true })
       return
     }
+    if (aberto) {
+      await stripe.checkout.sessions.expire(aberto.sessaoStripeId).catch(() => null)
+      await db.pagamentoPedido.update({ where: { id: aberto.id }, data: { status: StatusPagamento.expirado } })
+    }
 
-    const valorCentavos = Math.round(Number(pedido.preco) * 100)
     const itens = pedido.itens.map((i) => `${i.quantidade}x ${i.produto.nome}`).join(', ')
     const expiraEm = new Date(Date.now() + VALIDADE_LINK_MINUTOS * 60 * 1000)
 
@@ -284,13 +294,23 @@ routes.post('/pagamentos/pedidos/:id/link', async (req, res) => {
           quantity: 1,
           price_data: {
             currency: 'brl',
-            unit_amount: valorCentavos,
+            unit_amount: itensCentavos,
             product_data: {
               name: `Pedido #${pedido.id}${pedido.restaurante ? ` • ${pedido.restaurante.nome}` : ''}`,
               ...(itens && { description: itens.slice(0, 500) }),
             },
           },
         },
+        ...(freteCentavos > 0
+          ? [{
+              quantity: 1,
+              price_data: {
+                currency: 'brl',
+                unit_amount: freteCentavos,
+                product_data: { name: 'Taxa de entrega' },
+              },
+            }]
+          : []),
       ],
       metadata: { pedidoId: String(pedido.id) },
       payment_intent_data: { metadata: { pedidoId: String(pedido.id) } },
@@ -304,7 +324,7 @@ routes.post('/pagamentos/pedidos/:id/link', async (req, res) => {
         pedidoId: pedido.id,
         sessaoStripeId: sessao.id,
         url: sessao.url ?? '',
-        valor: pedido.preco,
+        valor: totalCentavos / 100,
         expiraEm,
       },
     })

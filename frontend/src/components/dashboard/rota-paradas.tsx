@@ -1,10 +1,8 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Botao, Cartao, Chip, Divisor, Icone, Texto } from '@/components/dashboard/ui';
-import { Fonts } from '@/constants/theme';
 import { Espacamento, Raio } from '@/constants/tokens';
-import { type Parada, type PontoPartida } from '@/data/rotas';
+import { MAXIMO_PARADAS, type Parada, type PontoPartida } from '@/data/rotas';
 import { useCores } from '@/hooks/use-cores';
 
 /** Selo amarelo com o número da parada. */
@@ -20,22 +18,21 @@ export function SeloNumero({ numero, tamanho = 32 }: { numero: number; tamanho?:
 }
 
 type Props = {
-  partida: PontoPartida;
-  onPartida: (partida: PontoPartida) => void;
+  partida: PontoPartida | null;
+  /** Pedidos na rota, na ordem de entrega. */
   paradas: Parada[];
+  /** Pedidos prontos que ainda não estão na rota. */
+  disponiveis: Parada[];
   onParadas: (paradas: Parada[]) => void;
   onVisualizar: () => void;
+  carregando: boolean;
+  ocupado: boolean;
 };
 
-/** Ponto de partida e lista ordenada de paradas. A ordem muda pelos botões subir/descer. */
-export function RotaParadas({ partida, onPartida, paradas, onParadas, onVisualizar }: Props) {
+/** Ponto de partida (restaurante) e a sequência de pedidos prontos. A ordem muda pelos botões subir/descer. */
+export function RotaParadas({ partida, paradas, disponiveis, onParadas, onVisualizar, carregando, ocupado }: Props) {
   const cores = useCores();
-  const [editandoPartida, setEditandoPartida] = useState(false);
-
-  const estiloEntrada = [styles.entrada, { color: cores.textoPrincipal, borderColor: cores.borda, fontFamily: Fonts?.sans }];
-
-  const atualizar = (id: number, campo: 'cliente' | 'endereco' | 'complemento', valor: string) =>
-    onParadas(paradas.map((p) => (p.id === id ? { ...p, [campo]: valor } : p)));
+  const cheia = paradas.length >= MAXIMO_PARADAS;
 
   const mover = (indice: number, delta: -1 | 1) => {
     const destino = indice + delta;
@@ -46,118 +43,99 @@ export function RotaParadas({ partida, onPartida, paradas, onParadas, onVisualiz
   };
 
   const remover = (id: number) => onParadas(paradas.filter((p) => p.id !== id));
-
-  const adicionar = () =>
-    onParadas([...paradas, { id: Date.now(), cliente: '', endereco: '', complemento: '' }]);
+  const adicionar = (parada: Parada) => onParadas([...paradas, parada]);
 
   return (
     <Cartao style={styles.cartao}>
       <View style={styles.linha}>
-        <Texto tamanho={18} peso={500}>Sequência de paradas</Texto>
+        <Texto tamanho={18} peso={500} style={styles.flex}>Sequência de paradas</Texto>
         <Chip rotulo={paradas.length === 1 ? '1 parada' : paradas.length + ' paradas'} />
       </View>
       <Texto tamanho={13} cor="textoSecundario">
-        Use as setas para alterar a ordem. O mapa segue a sequência abaixo.
+        As paradas são os pedidos prontos para entrega. Use as setas para alterar a ordem.
       </Texto>
 
       <Texto peso={600}>Ponto de partida</Texto>
       <View style={[styles.partida, { borderColor: cores.borda, backgroundColor: cores.fundo }]}>
         <Icone nome="loja" />
-        <View style={styles.partidaTexto}>
-          <Texto peso={600}>{partida.nome}</Texto>
-          {editandoPartida ? (
-            <TextInput
-              accessibilityLabel="Endereço do ponto de partida"
-              value={partida.endereco}
-              onChangeText={(endereco) => onPartida({ ...partida, endereco })}
-              style={estiloEntrada}
-            />
-          ) : (
-            <Texto tamanho={13} cor="textoSecundario">{partida.endereco}</Texto>
-          )}
+        <View style={styles.flex}>
+          <Texto peso={600}>{partida?.nome ?? 'Selecione um restaurante'}</Texto>
+          {partida && <Texto tamanho={13} cor="textoSecundario">{partida.endereco}</Texto>}
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={editandoPartida ? 'Concluir edição do ponto de partida' : 'Editar ponto de partida'}
-          onPress={() => setEditandoPartida(!editandoPartida)}
-          hitSlop={8}>
-          <Icone nome={editandoPartida ? 'check' : 'editar'} />
-        </Pressable>
       </View>
 
       <Divisor />
 
       {paradas.map((parada, indice) => (
-        <View key={parada.id} style={styles.parada}>
-          <View style={styles.linha}>
-            <View style={styles.ordem}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={'Subir parada ' + (indice + 1)}
-                disabled={indice === 0}
-                onPress={() => mover(indice, -1)}
-                hitSlop={6}
-                style={indice === 0 && styles.desativado}>
-                <Icone nome="subir" tamanho={16} />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={'Descer parada ' + (indice + 1)}
-                disabled={indice === paradas.length - 1}
-                onPress={() => mover(indice, 1)}
-                hitSlop={6}
-                style={indice === paradas.length - 1 && styles.desativado}>
-                <Icone nome="seta" tamanho={16} />
-              </Pressable>
-            </View>
-            <SeloNumero numero={indice + 1} />
-            <TextInput
-              accessibilityLabel={'Cliente da parada ' + (indice + 1)}
-              value={parada.cliente}
-              onChangeText={(valor) => atualizar(parada.id, 'cliente', valor)}
-              placeholder="Nome do cliente"
-              placeholderTextColor={cores.textoSecundario}
-              style={[styles.cliente, { color: cores.textoPrincipal, fontFamily: Fonts?.sans }]}
-            />
+        <View key={parada.id} style={styles.linha}>
+          <View style={styles.ordem}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={'Remover parada ' + (indice + 1)}
-              onPress={() => remover(parada.id)}
-              hitSlop={8}>
-              <Icone nome="fechar" tamanho={18} />
+              accessibilityLabel={'Subir parada ' + (indice + 1)}
+              disabled={ocupado || indice === 0}
+              onPress={() => mover(indice, -1)}
+              hitSlop={6}
+              style={indice === 0 && styles.desativado}>
+              <Icone nome="subir" tamanho={16} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={'Descer parada ' + (indice + 1)}
+              disabled={ocupado || indice === paradas.length - 1}
+              onPress={() => mover(indice, 1)}
+              hitSlop={6}
+              style={indice === paradas.length - 1 && styles.desativado}>
+              <Icone nome="seta" tamanho={16} />
             </Pressable>
           </View>
-          <View style={[styles.enderecoCampo, { borderColor: cores.borda }]}>
-            <TextInput
-              accessibilityLabel={'Endereço da parada ' + (indice + 1)}
-              value={parada.endereco}
-              onChangeText={(valor) => atualizar(parada.id, 'endereco', valor)}
-              placeholder="Rua, número"
-              placeholderTextColor={cores.textoSecundario}
-              style={[styles.enderecoEntrada, { color: cores.textoPrincipal, fontFamily: Fonts?.sans }]}
-            />
-            <Icone nome="busca" tamanho={18} />
+          <SeloNumero numero={indice + 1} />
+          <View style={styles.flex}>
+            <Texto peso={600}>#{parada.id} • {parada.cliente}</Texto>
+            <Texto tamanho={14}>{parada.endereco}</Texto>
+            <Texto tamanho={13} cor="textoSecundario">{parada.complemento}</Texto>
           </View>
-          <TextInput
-            accessibilityLabel={'Complemento da parada ' + (indice + 1)}
-            value={parada.complemento}
-            onChangeText={(valor) => atualizar(parada.id, 'complemento', valor)}
-            placeholder="Bairro • complemento"
-            placeholderTextColor={cores.textoSecundario}
-            style={[styles.complemento, { color: cores.textoSecundario, fontFamily: Fonts?.sans }]}
-          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={'Tirar o pedido ' + parada.id + ' da rota'}
+            disabled={ocupado}
+            onPress={() => remover(parada.id)}
+            hitSlop={8}>
+            <Icone nome="fechar" tamanho={18} />
+          </Pressable>
         </View>
       ))}
 
       {paradas.length === 0 && (
-        <Texto cor="textoSecundario">Nenhuma parada na rota. Adicione a primeira entrega.</Texto>
+        <Texto cor="textoSecundario">
+          {carregando ? 'Carregando pedidos prontos…' : 'Nenhum pedido na rota. Adicione um pedido pronto abaixo.'}
+        </Texto>
       )}
 
-      <Botao rotulo="Adicionar parada" icone="mais" onPress={adicionar} />
+      {disponiveis.length > 0 && (
+        <>
+          <Divisor />
+          <Texto peso={600}>Pedidos prontos fora da rota</Texto>
+          {disponiveis.map((parada) => (
+            <View key={parada.id} style={styles.linha}>
+              <View style={styles.flex}>
+                <Texto peso={500}>#{parada.id} • {parada.cliente}</Texto>
+                <Texto tamanho={13} cor="textoSecundario">{parada.endereco} • {parada.complemento}</Texto>
+              </View>
+              <Botao rotulo="Adicionar" icone="mais" disabled={ocupado || cheia} onPress={() => adicionar(parada)} />
+            </View>
+          ))}
+          {cheia && (
+            <Texto tamanho={13} cor="textoSecundario">
+              A rota aceita até {MAXIMO_PARADAS} paradas (limite do link do Google Maps).
+            </Texto>
+          )}
+        </>
+      )}
+
       <Divisor />
-      <Botao rotulo="Visualizar rota no mapa" icone="mapa" variante="primario" disabled={paradas.length === 0} onPress={onVisualizar} />
+      <Botao rotulo="Visualizar rota no mapa" icone="mapa" variante="primario" disabled={ocupado || paradas.length === 0} onPress={onVisualizar} />
       <Texto tamanho={13} cor="textoSecundario">
-        Ao editar os endereços ou a ordem, visualize a rota novamente.
+        Ao mudar os pedidos ou a ordem, visualize a rota novamente.
       </Texto>
     </Cartao>
   );
@@ -166,15 +144,9 @@ export function RotaParadas({ partida, onPartida, paradas, onParadas, onVisualiz
 const styles = StyleSheet.create({
   cartao: { gap: Espacamento.medium },
   linha: { flexDirection: 'row', alignItems: 'center', gap: Espacamento.small },
+  flex: { flex: 1, gap: Espacamento.xsmall },
   selo: { alignItems: 'center', justifyContent: 'center', borderRadius: Raio.small },
   partida: { flexDirection: 'row', alignItems: 'center', gap: Espacamento.medium, padding: Espacamento.medium, borderWidth: 1, borderRadius: Raio.small },
-  partidaTexto: { flex: 1, gap: Espacamento.xsmall },
-  parada: { gap: Espacamento.small },
   ordem: { alignItems: 'center', gap: Espacamento.xsmall },
   desativado: { opacity: 0.3 },
-  cliente: { flex: 1, fontSize: 14, fontWeight: '600', paddingVertical: Espacamento.xsmall },
-  entrada: { minHeight: 40, borderWidth: 1, borderRadius: Raio.small, paddingHorizontal: Espacamento.medium, fontSize: 14 },
-  enderecoCampo: { flexDirection: 'row', alignItems: 'center', gap: Espacamento.small, minHeight: 44, borderWidth: 1, borderRadius: Raio.small, paddingHorizontal: Espacamento.medium },
-  enderecoEntrada: { flex: 1, fontSize: 16, minHeight: 44 },
-  complemento: { fontSize: 13, paddingVertical: Espacamento.xsmall },
 });

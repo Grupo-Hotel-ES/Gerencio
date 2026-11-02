@@ -87,9 +87,16 @@ export function OrderCard({ pedido, onAvancar, onCancelar, ocupado = false, paga
 
       <View style={styles.linha}>
         <Etiqueta rotulo={status.rotulo} corPonto={corStatus} />
-        <Texto tamanho={17} peso={500}>
-          {formatarReais(pedido.total)}
-        </Texto>
+        <View style={styles.valores}>
+          <Texto tamanho={17} peso={500}>
+            {formatarReais(pedido.total)}
+          </Texto>
+          {pedido.taxaEntrega > 0 && (
+            <Texto tamanho={12} cor="textoSecundario">
+              inclui entrega de {formatarReais(pedido.taxaEntrega)}
+            </Texto>
+          )}
+        </View>
       </View>
 
       <Pressable
@@ -177,6 +184,9 @@ const styles = StyleSheet.create({
   },
   pressionado: {
     opacity: 0.7,
+  },
+  valores: {
+    alignItems: 'flex-end',
   },
   painelLink: {
     gap: Espacamento.medium,

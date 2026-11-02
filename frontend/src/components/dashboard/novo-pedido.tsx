@@ -5,7 +5,7 @@ import { Campo, SeletorRestaurante } from './formularios';
 import { Botao, Cartao, Chip, Texto } from './ui';
 import { Espacamento } from '@/constants/tokens';
 import { formatarReais } from '@/data/pedidos';
-import { criarPedido, type NovoPedido } from '@/services/api-pedidos';
+import { cotarFrete, criarPedido, type CotacaoFrete, type NovoPedido } from '@/services/api-pedidos';
 import { listarProdutos, type Produto, type Restaurante } from '@/services/api-produtos';
 
 export function FormularioPedido({ restaurantes, restauranteInicial, onConcluir, onFechar }: {
@@ -21,6 +21,10 @@ export function FormularioPedido({ restaurantes, restauranteInicial, onConcluir,
   const [endereco, setEndereco] = useState('');
   const [cep, setCep] = useState('');
   const [erro, setErro] = useState<string | null>(null);
+  // A cotação vale para o restaurante, endereço e CEP em que foi feita (chave)
+  const [frete, setFrete] = useState<{ chave: string; cotacao: CotacaoFrete } | null>(null);
+  const [cotando, setCotando] = useState(false);
+  const [erroFrete, setErroFrete] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const enviando = useRef(false);
@@ -35,16 +39,40 @@ export function FormularioPedido({ restaurantes, restauranteInicial, onConcluir,
   }, [restauranteId]);
 
   const itens = produtos.filter((p) => quantidades[p.id] > 0).map((p) => ({ produtoId: p.id, quantidade: quantidades[p.id] }));
-  const total = produtos.reduce((soma, p) => soma + p.preco * (quantidades[p.id] ?? 0), 0);
+  const subtotal = produtos.reduce((soma, p) => soma + p.preco * (quantidades[p.id] ?? 0), 0);
+  const chaveFrete = `${restauranteId}|${endereco.trim()}|${cep.trim()}`;
+  const cotacao = !retirada && frete?.chave === chaveFrete ? frete.cotacao : null;
+  const taxaEntrega = cotacao?.taxaEntrega ?? 0;
+  const total = subtotal + taxaEntrega;
+
+  const calcularFrete = async () => {
+    if (!restauranteId || !endereco.trim() || !cep.trim()) { setErroFrete('Informe o endereço e o CEP.'); return; }
+    setCotando(true); setErroFrete(null);
+    try {
+      const resultado = await cotarFrete(restauranteId, endereco.trim(), cep.trim());
+      setFrete({ chave: chaveFrete, cotacao: resultado });
+      if (resultado.taxaEntrega === null) setErroFrete(resultado.motivoRecusa ?? 'Endereço fora da área de entrega.');
+    } catch (e) { setFrete(null); setErroFrete((e as Error).message); }
+    finally { setCotando(false); }
+  };
+
   const salvar = async () => {
     if (enviando.current) return;
     if (!restauranteId || !nomeCliente.trim() || itens.length === 0 || (!retirada && (!endereco.trim() || !cep.trim()))) {
       setErro('Informe restaurante, cliente, produtos e o endereço com CEP para entrega.'); return;
     }
+    if (cotacao && cotacao.taxaEntrega === null) {
+      setErro(cotacao.motivoRecusa ?? 'Endereço fora da área de entrega.'); return;
+    }
     enviando.current = true; setSalvando(true); setErro(null);
     try {
       await criarPedido({ restauranteId, nomeCliente: nomeCliente.trim(), app: canal, metodoPagamento: pagamento,
-        enderecoDestino: retirada ? 'Retirada no balcão' : endereco.trim(), cepDestino: retirada ? '' : cep.trim(), itens });
+        enderecoDestino: retirada ? 'Retirada no balcão' : endereco.trim(), cepDestino: retirada ? '' : cep.trim(), itens,
+        // Sem cotação na tela, a api-pedidos calcula o frete ao criar a entrega
+        ...(cotacao?.taxaEntrega != null && {
+          custoEntrega: cotacao.taxaEntrega, distanciaKm: cotacao.distanciaKm,
+          latitude: cotacao.destino.latitude, longitude: cotacao.destino.longitude,
+        }) });
       onConcluir(restauranteId);
     } catch (e) { setErro((e as Error).message); }
     finally { enviando.current = false; setSalvando(false); }
@@ -69,7 +97,17 @@ export function FormularioPedido({ restaurantes, restauranteInicial, onConcluir,
         <Chip rotulo="Entrega" ativo={!retirada} onPress={salvando ? undefined : () => setRetirada(false)} />
       </View>
       {!retirada && <><Campo rotulo="Endereço de entrega" value={endereco} onChangeText={setEndereco} editable={!salvando} />
-        <Campo rotulo="CEP" value={cep} onChangeText={setCep} editable={!salvando} /></>}
+        <Campo rotulo="CEP" value={cep} onChangeText={setCep} editable={!salvando} />
+        <View style={styles.linha}>
+          <Botao rotulo={cotando ? 'Calculando…' : 'Calcular frete'} icone="motoboy" disabled={salvando || cotando} onPress={calcularFrete} />
+          {cotacao?.taxaEntrega != null && (
+            <Texto cor="textoSecundario">
+              Entrega: {formatarReais(cotacao.taxaEntrega)} • {cotacao.distanciaKm.toLocaleString('pt-BR')} km • cerca de {cotacao.duracaoEstimadaMinutos} min
+            </Texto>
+          )}
+        </View>
+        {erroFrete && <Texto cor="feedbackErro" accessibilityRole="alert">{erroFrete}</Texto>}
+        {!cotacao && !erroFrete && <Texto cor="textoSecundario">O frete também é calculado ao criar o pedido.</Texto>}</>}
       <Texto peso={500}>Produtos</Texto>
       {carregando && <Texto>Carregando produtos…</Texto>}
       {!carregando && produtos.length === 0 && <Texto>Cadastre os produtos na tela de estoque.</Texto>}
@@ -81,6 +119,9 @@ export function FormularioPedido({ restaurantes, restauranteInicial, onConcluir,
         <Botao rotulo="+" accessibilityLabel={`Adicionar uma unidade de ${p.nome}`} disabled={salvando || (quantidades[p.id] ?? 0) >= p.quantidade}
           onPress={() => setQuantidades((atual) => ({ ...atual, [p.id]: (atual[p.id] ?? 0) + 1 }))} />
       </View>)}
+      {cotacao?.taxaEntrega != null && (
+        <Texto cor="textoSecundario">Subtotal {formatarReais(subtotal)} + entrega {formatarReais(taxaEntrega)}</Texto>
+      )}
       <Texto tamanho={20} peso={600}>Total: {formatarReais(total)}</Texto>
       <Texto cor="textoSecundario">O pedido entra como novo. As unidades são reservadas ao aceitar na fila.</Texto>
       {erro && <Texto cor="feedbackErro" accessibilityRole="alert">{erro}</Texto>}

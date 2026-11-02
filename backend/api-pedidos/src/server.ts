@@ -1,6 +1,7 @@
 // api-pedidos/src/server.ts
 import express, { type ErrorRequestHandler } from 'express'
 import routes from './routes'
+import rotasEntrega from './rotas-entrega'
 
 const app = express()
 
@@ -27,6 +28,7 @@ app.get('/health', (req, res) => {
 
 // Rotas
 app.use('/api', routes)
+app.use('/api', rotasEntrega)
 
 // Rota não encontrada
 app.use((req, res) => {
