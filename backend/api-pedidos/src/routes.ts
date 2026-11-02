@@ -9,6 +9,7 @@ import {
   prepararItensPedido,
   mudarStatusPedido,
   cotarFreteRestaurante,
+  resolverRestauranteId,
 } from '@geroncio/shared-db'
 
 const routes = Router()
@@ -74,9 +75,10 @@ routes.post('/pedidos/cotacao-frete', async (req, res) => {
     longitude,
   } = req.body
 
-  const idRestaurante = parseId(restauranteId !== undefined ? String(restauranteId) : undefined)
-  if (idRestaurante === null) {
-    res.status(400).json({ error: 'restauranteId válido é obrigatório' })
+  // App de um restaurante só: sem restauranteId, usa o restaurante principal
+  const idInformado = restauranteId === undefined || restauranteId === null ? undefined : parseId(String(restauranteId))
+  if (idInformado === null) {
+    res.status(400).json({ error: 'restauranteId inválido' })
     return
   }
 
@@ -96,7 +98,7 @@ routes.post('/pedidos/cotacao-frete', async (req, res) => {
   }
 
   try {
-    const cotacao = await cotarFreteRestaurante(idRestaurante, {
+    const cotacao = await cotarFreteRestaurante(await resolverRestauranteId(idInformado), {
       enderecoDestino,
       cepDestino,
       cidadeDestino,

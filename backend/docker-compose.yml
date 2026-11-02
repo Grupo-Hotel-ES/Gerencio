@@ -6,6 +6,8 @@ x-api-common: &api-common
   environment: &api-env
     DATABASE_URL: postgresql://${POSTGRES_USER:-geroncio}:${POSTGRES_PASSWORD:-geroncio_dev}@postgres:5432/${POSTGRES_DB:-geroncio}
     NODE_ENV: production
+    # Assina os tokens de login; precisa ser o mesmo em todas as APIs (openssl rand -hex 32)
+    AUTH_SECRET: ${AUTH_SECRET:-}
 
 services:
   postgres:

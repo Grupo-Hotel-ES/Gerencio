@@ -4,6 +4,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { SessaoProvider } from '@/data/sessao';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -15,7 +16,9 @@ export default function RootLayout() {
         <title>Gerêncio</title>
       </Head>
       <AnimatedSplashOverlay />
-      <Stack screenOptions={{ headerShown: false }} />
+      <SessaoProvider>
+        <Stack screenOptions={{ headerShown: false }} />
+      </SessaoProvider>
     </ThemeProvider>
   );
 }

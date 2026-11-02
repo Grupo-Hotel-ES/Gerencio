@@ -30,12 +30,14 @@ export function TopBar() {
   return (
     <View style={[styles.container, { backgroundColor: cores.superficie }]}>
       <Texto tamanho={16} peso={500}>
-        {perfil.nomeRestaurante}
+        {perfil?.nomeRestaurante ?? ''}
       </Texto>
-      <Etiqueta
-        rotulo={perfil.lojaAberta ? 'Loja aberta' : 'Loja fechada'}
-        corPonto={perfil.lojaAberta ? cores.statusEntregue : cores.statusCancelado}
-      />
+      {perfil && (
+        <Etiqueta
+          rotulo={perfil.lojaAberta ? 'Loja aberta' : 'Loja fechada'}
+          corPonto={perfil.lojaAberta ? cores.statusEntregue : cores.statusCancelado}
+        />
+      )}
 
       <View style={styles.direita}>
         <Texto tamanho={13} cor="textoSecundario">
@@ -47,7 +49,7 @@ export function TopBar() {
         <Link href="/perfil" asChild>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Perfil de ${perfil.nomeCompleto}`}
+            accessibilityLabel={`Perfil de ${perfil?.nomeCompleto ?? ''}`}
             style={StyleSheet.flatten([styles.avatar, { backgroundColor: cores.brand }])}>
             <Texto peso={600} cor="textOnBrand">
               {iniciais}

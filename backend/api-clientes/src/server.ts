@@ -1,5 +1,6 @@
 // api-clientes/src/server.ts
 import express, { type ErrorRequestHandler } from 'express'
+import { exigirLoginPublico } from '@geroncio/shared-db'
 import routes from './routes'
 
 const app = express()
@@ -24,6 +25,9 @@ app.use((req, res, next) => {
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', service: 'api-clientes' })
 })
+
+// Login: obrigatório para quem chega pela internet (nginx); chamadas internas passam direto
+app.use(exigirLoginPublico())
 
 // Rotas
 app.use('/api', routes)

@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { db, parseId, ErroOperacao } from '@geroncio/shared-db'
+import { db, parseId, ErroOperacao, resolverRestauranteId } from '@geroncio/shared-db'
 
 const routes = Router()
 
@@ -9,7 +9,10 @@ routes.post('/produtos', async (req, res) => {
   try {
     const { nome, preco, restauranteId, categoria = 'Sem categoria', quantidade = 0 } = req.body
 
-    const parsedRestauranteId = parseId(restauranteId)
+    // App de um restaurante só: sem restauranteId, o produto vai para o restaurante principal
+    const parsedRestauranteId = restauranteId === undefined || restauranteId === null || restauranteId === ''
+      ? await resolverRestauranteId()
+      : parseId(String(restauranteId))
     const parsedPreco = Number(preco)
 
     if (typeof nome !== 'string' || !nome.trim() || preco === null || preco === '' || !Number.isFinite(parsedPreco) || parsedPreco < 0 || parsedPreco > 99_999_999.99 || parsedRestauranteId === null ||
@@ -123,7 +126,7 @@ routes.put('/produtos/:id', async (req, res) => {
 
   const { nome, preco, restauranteId } = req.body
   const parsedPreco = Number(preco)
-  const parsedRestauranteId = parseId(restauranteId)
+  const parsedRestauranteId = restauranteId === undefined ? produtoExistente.restauranteId : parseId(String(restauranteId))
 
   if (typeof nome !== 'string' || !nome.trim() || preco === null || preco === '' || !Number.isFinite(parsedPreco) || parsedPreco < 0 || parsedPreco > 99_999_999.99 || parsedRestauranteId === null) {
     res.status(400).json({ error: 'Nome, preço e restauranteId são obrigatórios.' })

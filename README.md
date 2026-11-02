@@ -122,6 +122,8 @@ pnpm backend:docker
 pnpm studio
 ```
 
+Para entrar no painel, use o usuário **admin** e a senha **admin123** (criado automaticamente quando não há nenhum usuário). Troque a senha em Perfil e cadastre a equipe em Configurações → Usuários e permissões.
+
 O Expo abre o menu com as opções de execução: build de desenvolvimento, emulador Android, simulador iOS, Expo Go ou navegador. Dentro de `frontend/` também estão disponíveis `pnpm android`, `pnpm ios`, `pnpm web` e `pnpm lint`.
 
 ### Mock das plataformas de delivery
@@ -143,6 +145,176 @@ pnpm mock:studio
 | Banco do mock (Postgres) | `localhost:5433` |
 
 O banco e a API continuam rodando depois de fechar o formulário; para derrubá-los, use `cd mock && pnpm db:down`.
+
+## Deploy (VPS)
+
+Produção em uma VPS Ubuntu com Docker (Postgres + APIs), nginx (frontend estático + proxy das APIs) e HTTPS pelo Let's Encrypt. Tudo fica no mesmo domínio; nos exemplos, `geroncio.exemplo.com` (sem domínio próprio, use `<ip-com-hífens>.sslip.io`, que já resolve para o IP).
+
+```
+https://geroncio.exemplo.com/                  → frontend (/var/www/geroncio)
+https://geroncio.exemplo.com/svc/pedidos/      → 127.0.0.1:3002
+https://geroncio.exemplo.com/svc/restaurantes/ → 127.0.0.1:3003
+https://geroncio.exemplo.com/svc/produtos/     → 127.0.0.1:3004
+https://geroncio.exemplo.com/svc/pagamentos/   → 127.0.0.1:3006
+```
+
+### 1. Pacotes
+
+```bash
+# swap (o build do frontend precisa de memória em VPS pequenas)
+fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+apt update
+apt install -y docker.io docker-compose-v2 nginx certbot python3-certbot-nginx nodejs npm
+systemctl enable --now docker
+
+# pnpm na versão do projeto (o corepack empacotado no Ubuntu não roda o pnpm 11)
+corepack disable; rm -f /usr/bin/pnpm /usr/bin/pnpx
+npm install -g pnpm@11.24.0
+```
+
+Precisa de Docker Compose ≥ 2.24 (por causa do `!override` abaixo) e Node 22.
+
+### 2. Firewall
+
+```bash
+ufw allow OpenSSH
+ufw allow 'Nginx Full'
+ufw --force enable
+```
+
+O Docker publica portas por fora do `ufw`; quem fecha as portas internas é o override do passo 3.
+
+### 3. Backend
+
+`backend/.env` (gere as senhas com `openssl rand -hex 24`; `chmod 600 backend/.env`):
+
+```env
+POSTGRES_USER=geroncio
+POSTGRES_PASSWORD=<senha>
+POSTGRES_DB=geroncio
+POSTGRES_PORT=5432
+DATABASE_URL=postgresql://geroncio:<senha>@localhost:5432/geroncio
+AUTHENTICATION_API_KEY=<chave>            # Evolution; o compose exige mesmo com o chatbot desligado
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...           # do endpoint .../svc/pagamentos/api/webhooks/stripe
+PAGAMENTOS_URL_PUBLICA=https://geroncio.exemplo.com/svc/pagamentos
+AUTH_SECRET=<chave longa>                 # assina os tokens de login (openssl rand -hex 32)
+```
+
+`backend/docker-compose.override.yml` (só na VPS; o compose lê sozinho) publica as portas apenas em `127.0.0.1`:
+
+```yaml
+services:
+  postgres:         { ports: !override ["127.0.0.1:5432:5432"] }
+  api-clientes:     { ports: !override ["127.0.0.1:3001:3001"] }
+  api-pedidos:      { ports: !override ["127.0.0.1:3002:3002"] }
+  api-restaurantes: { ports: !override ["127.0.0.1:3003:3003"] }
+  api-produtos:     { ports: !override ["127.0.0.1:3004:3004"] }
+  api-integracao:   { ports: !override ["127.0.0.1:3005:3005"] }
+  api-pagamentos:   { ports: !override ["127.0.0.1:3006:3006"] }
+  chatbot:          { ports: !override ["127.0.0.1:5678:5678"] }
+  evolution-api:    { ports: !override ["127.0.0.1:8080:8080"] }
+  llm:              { ports: !override ["127.0.0.1:11434:11434"] }
+```
+
+```bash
+echo backend/docker-compose.override.yml >> .git/info/exclude
+cd backend
+docker compose up -d --build   # Postgres + APIs (o chatbot fica no profile "chatbot")
+pnpm install
+pnpm db:deploy                 # o compose não aplica as migrations
+docker compose restart
+curl -s localhost:3002/health
+```
+
+### 4. Frontend
+
+`frontend/.env` (os valores entram no código no build):
+
+```env
+EXPO_PUBLIC_API_PEDIDOS_URL=https://geroncio.exemplo.com/svc/pedidos/api
+EXPO_PUBLIC_API_PRODUTOS_URL=https://geroncio.exemplo.com/svc/produtos
+EXPO_PUBLIC_API_RESTAURANTES_URL=https://geroncio.exemplo.com/svc/restaurantes/api
+EXPO_PUBLIC_API_PAGAMENTOS_URL=https://geroncio.exemplo.com/svc/pagamentos/api
+EXPO_PUBLIC_URL_RETORNO_PAGAMENTO=https://geroncio.exemplo.com/assinatura/pagamento
+```
+
+A `api-produtos` não usa o prefixo `/api`, por isso a URL dela é diferente.
+
+```bash
+cd frontend
+pnpm install
+NODE_OPTIONS=--max-old-space-size=3072 pnpm exec expo export --platform web   # gera dist/
+mkdir -p /var/www/geroncio && rsync -a --delete dist/ /var/www/geroncio/
+```
+
+### 5. nginx e HTTPS
+
+`/etc/nginx/proxy_geroncio.conf`:
+
+```nginx
+proxy_http_version 1.1;
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+# Marca o tráfego da internet: só ele exige login (o chatbot chama as APIs por dentro do Docker)
+proxy_set_header X-Geroncio-Publico 1;
+# Calcular rota e cotar frete consultam serviços de mapa externos (Nominatim, OSRM)
+proxy_read_timeout 90s;
+```
+
+`/etc/nginx/sites-available/geroncio`:
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name geroncio.exemplo.com;
+
+    root /var/www/geroncio;
+    index index.html;
+
+    # Build "static" do Expo Router: cada tela vira um .html (ex.: /rotas -> rotas.html)
+    location / {
+        try_files $uri $uri.html $uri/ /index.html;
+    }
+
+    location /_expo/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # A barra no fim do proxy_pass tira o prefixo /svc/<nome>
+    location /svc/pedidos/      { proxy_pass http://127.0.0.1:3002/; include /etc/nginx/proxy_geroncio.conf; }
+    location /svc/restaurantes/ { proxy_pass http://127.0.0.1:3003/; include /etc/nginx/proxy_geroncio.conf; }
+    location /svc/produtos/     { proxy_pass http://127.0.0.1:3004/; include /etc/nginx/proxy_geroncio.conf; }
+    location /svc/pagamentos/   { proxy_pass http://127.0.0.1:3006/; include /etc/nginx/proxy_geroncio.conf; }
+}
+```
+
+```bash
+ln -s /etc/nginx/sites-available/geroncio /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default
+nginx -t && systemctl reload nginx
+certbot --nginx -d geroncio.exemplo.com --redirect   # cria o bloco 443 e agenda a renovação
+```
+
+### 6. Depois de subir
+
+- **Stripe:** crie o webhook em `https://geroncio.exemplo.com/svc/pagamentos/api/webhooks/stripe` (eventos `checkout.session.*`, `invoice.paid`, `invoice.payment_failed`, `customer.subscription.deleted`), coloque o `whsec_` no `backend/.env` e rode `docker compose up -d api-pagamentos`.
+- **Primeiro acesso:** entre com `admin` / `admin123` e **troque a senha** em Perfil. Depois preencha Configurações → Estabelecimento (nome e endereço real, usado no frete e nas rotas) e cadastre a equipe em Usuários e permissões.
+- **Chatbot:** o Ollama precisa de uns 4 a 5 GB de RAM livres. Para ligar, `pnpm chatbot` em `backend/`; o editor do n8n e o QR code da Evolution ficam só em `127.0.0.1`, então acesse por túnel: `ssh -L 8080:localhost:8080 -L 5678:localhost:5678 root@<vps>`.
+
+### Atualizar
+
+```bash
+cd /root/Gerencio && git pull
+cd backend && pnpm install && pnpm db:deploy && docker compose up -d --build
+cd ../frontend && pnpm install && pnpm exec expo export --platform web && rsync -a --delete dist/ /var/www/geroncio/
+```
 
 > **Status:** o frontend está em desenvolvimento e o backend ainda não foi implementado — `backend/` contém apenas a configuração inicial do pacote.
 

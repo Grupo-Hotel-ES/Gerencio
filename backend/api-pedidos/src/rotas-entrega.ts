@@ -8,6 +8,7 @@ import {
   obterCoordenadasEndereco,
   obterCoordenadasRestaurante,
   calcularRotaComParadas,
+  resolverRestauranteId,
   type Coordenada,
 } from '@geroncio/shared-db'
 
@@ -21,10 +22,11 @@ const VELOCIDADE_BICICLETA_KMPH = 15
 
 type EntradaRota = { restauranteId: number; pedidoIds: number[]; transporte: Transporte }
 
-/** Valida o corpo comum às duas rotas. Os ids vêm na ordem de entrega. */
-function lerEntrada(corpo: any): EntradaRota {
-  const restauranteId = parseId(corpo?.restauranteId !== undefined ? String(corpo.restauranteId) : undefined)
-  if (restauranteId === null) throw new ErroOperacao(400, 'restauranteId válido é obrigatório')
+/** Valida o corpo comum às duas rotas. Os ids vêm na ordem de entrega; sem restauranteId, usa o principal. */
+async function lerEntrada(corpo: any): Promise<EntradaRota> {
+  const informado = corpo?.restauranteId === undefined || corpo?.restauranteId === null ? undefined : parseId(String(corpo.restauranteId))
+  if (informado === null) throw new ErroOperacao(400, 'restauranteId inválido')
+  const restauranteId = await resolverRestauranteId(informado)
 
   const pedidoIds = Array.isArray(corpo?.pedidoIds) ? corpo.pedidoIds.map((id: unknown) => parseId(String(id))) : []
   if (pedidoIds.length === 0 || pedidoIds.some((id: number | null) => id === null)) {
@@ -117,7 +119,7 @@ function responderErro(res: any, error: any, mensagem: string) {
 // 1. CALCULAR ROTA (traçado pelas vias, distância e duração, para o mapa)
 routes.post('/rotas/calcular', async (req, res) => {
   try {
-    const entrada = lerEntrada(req.body)
+    const entrada = await lerEntrada(req.body)
     const { origem, paradas } = await montarParadas(entrada)
     const rota = await calcularRotaComParadas([origem, ...paradas])
 
@@ -135,7 +137,7 @@ routes.post('/rotas/calcular', async (req, res) => {
 // 2. EXPORTAR ROTA (link do Google Maps; os pedidos passam para "saiu_para_entrega")
 routes.post('/rotas/exportar', async (req, res) => {
   try {
-    const entrada = lerEntrada(req.body)
+    const entrada = await lerEntrada(req.body)
     const { origem, paradas } = await montarParadas(entrada)
     const url = linkGoogleMaps(origem, paradas, entrada.transporte)
 

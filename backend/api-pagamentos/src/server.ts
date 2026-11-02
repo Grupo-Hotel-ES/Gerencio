@@ -1,5 +1,6 @@
 // api-pagamentos/src/server.ts
 import express, { type ErrorRequestHandler } from 'express'
+import { exigirLoginPublico } from '@geroncio/shared-db'
 import routes, { type RequestComCorpoBruto } from './routes'
 
 const app = express()
@@ -31,6 +32,9 @@ app.use((req, res, next) => {
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', service: 'api-pagamentos' })
 })
+
+// Login: obrigatório para quem chega pela internet (nginx); chamadas internas passam direto
+app.use(exigirLoginPublico({ livres: ['/api/webhooks/stripe', '/api/pagamentos/retorno'] }))
 
 // Rotas
 app.use('/api', routes)

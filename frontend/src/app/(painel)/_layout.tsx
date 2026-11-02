@@ -1,11 +1,12 @@
-import { Slot } from 'expo-router';
+import { Redirect, Slot } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { LarguraConteudoProvider } from '@/components/dashboard/pagina';
 import { NavegacaoCompacta, Sidebar } from '@/components/dashboard/sidebar';
 import { TopBar } from '@/components/dashboard/top-bar';
 import { PerfilProvider } from '@/data/perfil-context';
+import { useSessao } from '@/data/sessao';
 import { useCores } from '@/hooks/use-cores';
 
 const LARGURA_SIDEBAR = 224;
@@ -16,6 +17,17 @@ export default function PainelLayout() {
   // Largura do protótipo web como valor inicial; ajustada no primeiro layout.
   const [largura, setLargura] = useState(1440);
   const comSidebar = largura >= 960;
+  const { carregando, usuario } = useSessao();
+
+  // O painel só abre com login
+  if (carregando) {
+    return (
+      <View style={[styles.carregando, { backgroundColor: cores.fundo }]}>
+        <ActivityIndicator color={cores.textoPrincipal} />
+      </View>
+    );
+  }
+  if (!usuario) return <Redirect href="/login" />;
 
   return (
     <PerfilProvider>
@@ -43,5 +55,10 @@ const styles = StyleSheet.create({
   },
   principal: {
     flex: 1,
+  },
+  carregando: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

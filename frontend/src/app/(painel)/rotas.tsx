@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { SeletorRestaurante } from '@/components/dashboard/formularios';
 import { Pagina, useLarguraConteudo } from '@/components/dashboard/pagina';
 import { RotaFormulario } from '@/components/dashboard/rota-formulario';
 import { RotaMapa } from '@/components/dashboard/rota-mapa';
@@ -13,7 +12,7 @@ import {
   MAXIMO_PARADAS, type MeioTransporte, type Parada, type PontoPartida, type RotaCalculada,
 } from '@/data/rotas';
 import { useCores } from '@/hooks/use-cores';
-import { listarRestaurantes, type Restaurante } from '@/services/api-produtos';
+import { usePerfil } from '@/data/perfil-context';
 import { calcularRota, exportarRota, listarPedidosParaRota } from '@/services/api-rotas';
 
 const INTERVALO_ATUALIZACAO_MS = 10_000;
@@ -25,9 +24,8 @@ export default function PlanejarRota() {
 
   const [nome, setNome] = useState('Rota Centro');
   const [transporte, setTransporte] = useState<MeioTransporte>('moto');
-  const [restaurantes, setRestaurantes] = useState<Restaurante[]>([]);
-  const [restauranteId, setRestauranteId] = useState<number>();
-  // Pedidos prontos do restaurante (fonte das paradas) e os que estão na rota, em ordem
+  const { restaurante } = usePerfil();
+  // Pedidos prontos (fonte das paradas) e os que estão na rota, em ordem
   const [prontos, setProntos] = useState<Parada[] | null>(null);
   const [paradas, setParadas] = useState<Parada[]>([]);
   // A rota calculada vale para a sequência em que foi feita (chave)
@@ -36,23 +34,17 @@ export default function PlanejarRota() {
   const [exportando, setExportando] = useState(false);
   const [exportada, setExportada] = useState<{ url: string; pedidoIds: number[] } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
-  // Restaurante cuja rota já foi preenchida com os prontos (só acontece uma vez por restaurante)
-  const preenchida = useRef<number | null>(null);
+  // A rota começa com todos os prontos só na primeira carga (e de novo depois de exportar)
+  const preenchida = useRef(false);
 
-  useEffect(() => {
-    listarRestaurantes()
-      .then((dados) => { setRestaurantes(dados); setRestauranteId((atual) => atual ?? dados[0]?.id); })
-      .catch((e: Error) => setErro(`Restaurantes: ${e.message}`));
-  }, []);
-
-  const carregarPedidos = useCallback(async (id: number) => {
+  const carregarPedidos = useCallback(async () => {
     try {
-      const dados = await listarPedidosParaRota(id);
+      const dados = await listarPedidosParaRota();
       setProntos(dados);
       // Na primeira carga, a rota começa com todos os prontos (até o limite). Depois, mantém
       // a ordem escolhida e só tira da rota quem deixou de estar pronto.
-      const primeiraCarga = preenchida.current !== id;
-      preenchida.current = id;
+      const primeiraCarga = !preenchida.current;
+      preenchida.current = true;
       setParadas((atuais) => {
         if (primeiraCarga) return dados.slice(0, MAXIMO_PARADAS);
         const porId = new Map(dados.map((p) => [p.id, p]));
@@ -64,28 +56,29 @@ export default function PlanejarRota() {
   }, []);
 
   useEffect(() => {
-    if (restauranteId === undefined) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- carregarPedidos atualiza o estado somente após a resposta HTTP.
-    carregarPedidos(restauranteId);
-    const intervalo = setInterval(() => carregarPedidos(restauranteId), INTERVALO_ATUALIZACAO_MS);
+    carregarPedidos();
+    const intervalo = setInterval(carregarPedidos, INTERVALO_ATUALIZACAO_MS);
     return () => clearInterval(intervalo);
-  }, [restauranteId, carregarPedidos]);
+  }, [carregarPedidos]);
 
-  const restaurante = restaurantes.find((r) => r.id === restauranteId);
   const partida: PontoPartida | null = restaurante
-    ? { nome: restaurante.nome, endereco: [restaurante.endereco, restaurante.cidade].filter(Boolean).join(' • ') }
+    ? {
+        nome: restaurante.nome,
+        endereco: [[restaurante.logradouro, restaurante.numero].filter(Boolean).join(', '), restaurante.cidade].filter(Boolean).join(' • '),
+      }
     : null;
   const disponiveis = (prontos ?? []).filter((p) => !paradas.some((r) => r.id === p.id));
   const pedidoIds = paradas.map((p) => p.id);
-  const chave = `${restauranteId}|${transporte}|${pedidoIds.join(',')}`;
+  const chave = `${transporte}|${pedidoIds.join(',')}`;
   const rotaAtual = rota?.chave === chave ? rota.dados : null;
   const ocupado = calculando || exportando;
 
   const visualizar = async () => {
-    if (restauranteId === undefined || pedidoIds.length === 0) return;
+    if (pedidoIds.length === 0) return;
     setCalculando(true); setErro(null);
     try {
-      const dados = await calcularRota({ restauranteId, pedidoIds, transporte });
+      const dados = await calcularRota({ pedidoIds, transporte });
       setRota({ chave, dados });
     } catch (e) {
       setErro((e as Error).message);
@@ -95,14 +88,14 @@ export default function PlanejarRota() {
   };
 
   const exportar = async () => {
-    if (restauranteId === undefined || pedidoIds.length === 0) return;
+    if (pedidoIds.length === 0) return;
     setExportando(true); setErro(null);
     try {
-      const resultado = await exportarRota({ restauranteId, pedidoIds, transporte });
+      const resultado = await exportarRota({ pedidoIds, transporte });
       setExportada(resultado);
       // Os pedidos exportados saem dos prontos; a próxima rota começa com os que sobraram
-      preenchida.current = null;
-      await carregarPedidos(restauranteId);
+      preenchida.current = false;
+      await carregarPedidos();
     } catch (e) {
       setErro((e as Error).message);
     } finally {
@@ -114,9 +107,6 @@ export default function PlanejarRota() {
     <Pagina
       titulo="Planejar rota"
       subtitulo="Monte a rota com os pedidos prontos, confira o percurso no mapa e envie ao entregador.">
-      <SeletorRestaurante restaurantes={restaurantes} valor={restauranteId} desabilitado={ocupado} onChange={(id) => {
-        setProntos(null); setParadas([]); setRota(null); setExportada(null); setErro(null); setRestauranteId(id);
-      }} />
       <RotaFormulario nome={nome} onNome={setNome} transporte={transporte} onTransporte={setTransporte} />
 
       {erro && (

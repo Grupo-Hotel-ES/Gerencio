@@ -5,6 +5,7 @@ import { Divisor, Icone, Texto, type NomeIcone } from './ui';
 
 import { Espacamento, Raio } from '@/constants/tokens';
 import { usePerfil } from '@/data/perfil-context';
+import { useSessao } from '@/data/sessao';
 import { useCores } from '@/hooks/use-cores';
 
 const NAVEGACAO: { rotulo: string; icone: NomeIcone; href?: Href }[] = [
@@ -60,6 +61,7 @@ export function NavegacaoCompacta() {
 export function Sidebar() {
   const cores = useCores();
   const { perfil } = usePerfil();
+  const { sair } = useSessao();
 
   return (
     <View style={[styles.container, { backgroundColor: cores.superficie, borderColor: cores.borda }]}>
@@ -109,13 +111,18 @@ export function Sidebar() {
           <Link href="/perfil" asChild>
             <Pressable style={styles.usuario}>
               <Texto tamanho={16} peso={500}>
-                {perfil.nomeRestaurante}
+                {perfil?.nomeRestaurante ?? ''}
               </Texto>
               <Texto tamanho={13} cor="textoSecundario">
-                {perfil.nomeCompleto.split(' ')[0]} • {perfil.cargo}
+                {perfil ? `${perfil.nomeCompleto.split(' ')[0]} • ${perfil.cargo}` : ''}
               </Texto>
             </Pressable>
           </Link>
+
+          <Pressable accessibilityRole="button" onPress={sair} style={styles.ajuda}>
+            <Icone nome="sair" />
+            <Texto peso={500}>Sair</Texto>
+          </Pressable>
         </View>
       </ScrollView>
     </View>
