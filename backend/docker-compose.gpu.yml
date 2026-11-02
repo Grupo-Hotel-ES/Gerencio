@@ -1,5 +1,5 @@
 # Override para rodar o Ollama na GPU NVIDIA (precisa do nvidia-container-toolkit).
-# Uso: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# Uso: pnpm chatbot:up:gpu (em backend/)
 services:
   llm:
     deploy:

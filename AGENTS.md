@@ -39,14 +39,15 @@ Na raiz (atalhos definidos em `package.json`):
 | --- | --- |
 | `pnpm db` | Sobe só o Postgres do backend (Docker, porta 5432) |
 | `pnpm backend` | Roda todos os `api-*` em modo watch (`tsx watch`) |
-| `pnpm backend:docker` | Sobe Postgres + APIs em containers |
+| `pnpm backend:docker` | Sobe Postgres + APIs + n8n + Evolution em containers (sem o Ollama) |
+| `pnpm chatbot` | Sobe a LLM do chatbot (Ollama, serviço `llm`) |
 | `pnpm db:migrate` | `prisma migrate dev` no schema compartilhado |
 | `pnpm studio` | Prisma Studio do banco principal |
 | `pnpm frontend` / `pnpm dev` | Inicia o Expo |
 | `pnpm mock` | Sobe banco + API do mock e abre o formulário web |
 | `pnpm mock:studio` | Prisma Studio do banco do mock |
 
-Dentro de `backend/`: `pnpm typecheck` (roda `tsc --noEmit` em todos os pacotes), `pnpm db:generate`, `pnpm docker:logs`, `pnpm docker:down`.
+Dentro de `backend/`: `pnpm typecheck` (roda `tsc --noEmit` em todos os pacotes), `pnpm db:generate`, `pnpm docker:logs`, `pnpm docker:down` (derruba tudo, inclusive o Ollama), `pnpm chatbot:up:gpu`, `pnpm chatbot:down`.
 Dentro de `frontend/`: `pnpm web`, `pnpm android`, `pnpm ios`, `pnpm lint`.
 
 **Antes de concluir uma mudança**, rode `pnpm typecheck` em `backend/` e/ou `pnpm lint` em `frontend/`. Não há testes automatizados; os testes manuais das rotas ficam em `testes/*.http`.
@@ -102,7 +103,7 @@ routes.get('/pedidos/:id', async (req, res) => {
 
 `chatbot/Dockerfile` estende a imagem oficial `n8nio/n8n` com a versão fixada em `ARG N8N_VERSION`. No compose, o serviço `chatbot` expõe o editor em http://localhost:5678 e guarda os dados (workflows, credenciais, chave de criptografia) no volume `geroncio_n8ndata`, usando o SQLite interno. Não aponte o banco interno do n8n para o Postgres do Prisma: as tabelas dele quebrariam o `prisma migrate`. Dentro do compose, os workflows chamam as APIs pelo nome do serviço (`http://api-pedidos:3002/api`).
 
-A LLM do chatbot roda no serviço `llm` (`backend/llm/`, Ollama com a versão em `ARG OLLAMA_VERSION`), na porta 11434. O modelo é escolhido por `OLLAMA_MODEL` no `backend/.env` (padrão `qwen3.5:4b`) e baixado na subida do container para o volume `geroncio_ollama`; o healthcheck só fica `healthy` quando o modelo está pronto. Dentro do compose, a URL é `http://llm:11434`. Para usar GPU NVIDIA (precisa do `nvidia-container-toolkit`), suba com `pnpm docker:up:gpu` em `backend/`.
+A LLM do chatbot roda no serviço `llm` (`backend/llm/`, Ollama com a versão em `ARG OLLAMA_VERSION`), na porta 11434. Ele fica no profile `chatbot` do compose, então **não** sobe com `pnpm backend:docker`: rode `pnpm chatbot` na raiz. O modelo é escolhido por `OLLAMA_MODEL` no `backend/.env` (padrão `qwen3.5:4b`) e baixado na subida do container para o volume `geroncio_ollama`; o healthcheck só fica `healthy` quando o modelo está pronto. Dentro do compose, a URL é `http://llm:11434`. Para usar GPU NVIDIA (precisa do `nvidia-container-toolkit`), suba com `pnpm chatbot:up:gpu` em `backend/`.
 
 O atendimento pelo WhatsApp é o workflow `chatbot/workflows/atendimento-whatsapp.json`. A Evolution API (instância `geroncio`, QR code em http://localhost:8080/manager) envia `MESSAGES_UPSERT` para `http://chatbot:5678/webhook/whatsapp`, e o workflow funciona como orquestrador:
 
