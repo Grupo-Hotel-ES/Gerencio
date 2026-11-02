@@ -1,0 +1,96 @@
+@apiRestaurantes = http://localhost:3003/api
+@apiProdutos = http://localhost:3004/api
+@apiPedidos = http://localhost:3002/api
+
+### ============================================================================
+### ROTEIRO DE TESTES — CÁLCULO DE ROTA VIÁRIA E TAXA DE ENTREGA (WHATSAPP)
+### ============================================================================
+
+### 1. Criar Restaurante com Regras de Entrega Personalizadas (POST)
+POST {{apiRestaurantes}}/restaurantes
+Content-Type: application/json
+
+{
+  "cnpj": "12.345.678/0001-90",
+  "nome": "Hamburgueria Gerôncio SJC",
+  "email": "contato@geroncio.com.br",
+  "telefone": "12999990000",
+  "cep": "12247-014",
+  "cidade": "São José dos Campos",
+  "endereco": "Avenida Cesare Mansueto Giulio Lattes, 1201",
+  "taxaEntregaBase": 7.00,
+  "kmInclusosTaxaBase": 2.0,
+  "custoPorKmAdicional": 1.50,
+  "distanciaMaximaKm": 30.0
+}
+
+###
+
+### 2. Consultar Regras de Entrega do Restaurante (GET)
+GET {{apiRestaurantes}}/restaurantes/1/regras-entrega
+
+###
+
+### 3. Editar Regras de Entrega do Restaurante (PATCH)
+PATCH {{apiRestaurantes}}/restaurantes/1/regras-entrega
+Content-Type: application/json
+
+{
+  "taxaEntregaBase": 8.00,
+  "kmInclusosTaxaBase": 2.0,
+  "custoPorKmAdicional": 1.50,
+  "distanciaMaximaKm": 25.0
+}
+
+###
+
+### 4. Criar Produto do Restaurante para o Pedido (POST)
+POST {{apiProdutos}}/produtos
+Content-Type: application/json
+
+{
+  "nome": "Combo Smash Duplo + Fritas",
+  "preco": 39.90,
+  "restauranteId": 1
+}
+
+###
+
+### 5. Cotação de Frete pelas Vias — Atendimento via WhatsApp (POST)
+### O cliente visualiza a distância real pelas ruas e a taxa ANTES de finalizar o pedido
+POST {{apiPedidos}}/pedidos/cotacao-frete
+Content-Type: application/json
+
+{
+  "restauranteId": 1,
+  "enderecoDestino": "Avenida Andrômeda, 1500",
+  "cepDestino": "12230-000"
+}
+
+###
+
+### 6. Criar Pedido via WhatsApp — Cálculo e Registro Automático do Frete na Entrega (POST)
+### Mesmo sem enviar custoEntrega ou distanciaKm, o sistema calcula pelas vias e registra na Entrega
+POST {{apiPedidos}}/pedidos
+Content-Type: application/json
+
+{
+  "nomeCliente": "Leonardo Castro",
+  "preco": 39.90,
+  "metodoPagamento": "PIX",
+  "app": "whatsapp",
+  "enderecoDestino": "Avenida Andrômeda, 1500",
+  "cepDestino": "12230-000",
+  "itens": [
+    {
+      "produtoId": 1,
+      "quantidade": 1
+    }
+  ]
+}
+
+###
+
+### 7. Buscar Pedido Criado e Conferir Entrega Registrada (distanciaKm e custoEntrega) (GET)
+GET {{apiPedidos}}/pedidos/1
+

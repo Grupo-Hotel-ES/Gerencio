@@ -1,0 +1,73 @@
+@baseUrl = http://localhost:3003/api
+
+### 1. Criar Restaurante (POST)
+# @name createRestaurante
+POST {{baseUrl}}/restaurantes
+Content-Type: application/json
+
+{
+  "cnpj": "12345678000191",
+  "nome": "Chico Lanches",
+  "email": "contato@chicolanches.com",
+  "telefone": "11977776665",
+  "cep": "01310105",
+  "cidade": "Caçapava",
+  "endereco": "Av. Tiradentes, 1501"
+}
+
+
+###
+
+### 2. Listar Todos os Restaurantes (GET)
+GET {{baseUrl}}/restaurantes
+
+###
+
+### 3. Buscar Restaurante por ID (GET)
+GET {{baseUrl}}/restaurantes/1
+
+###
+
+### 4. Atualizar Restaurante Completo (PUT)
+PUT {{baseUrl}}/restaurantes/1
+Content-Type: application/json
+
+{
+  "cnpj": "12345678000199",
+  "nome": "Restaurante Divino Fogao Gourmet",
+  "email": "atendimento@DivinoFogaoGourmet.com",
+  "telefone": "11977775555",
+  "cep": "01310100",
+  "cidade": "São Paulo",
+  "endereco": "Av. Paulista, 1500 - Bloco B"
+}
+
+###
+
+### 5. Atualizar Restaurante Parcial (PATCH)
+PATCH {{baseUrl}}/restaurantes/1
+Content-Type: application/json
+
+{
+  "telefone": "11911112222"
+}
+
+###
+
+### 6. Listar Produtos do Restaurante (GET)
+GET {{baseUrl}}/restaurantes/1/produtos
+
+###
+
+### 7. Deletar Restaurante (DELETE)
+DELETE {{baseUrl}}/restaurantes/1
+
+###
+
+### 8. Testar ID Inválido (Tratamento de Erro - 400)
+GET {{baseUrl}}/restaurantes/abc
+
+###
+
+### 9. Buscar Restaurante Inexistente (Tratamento de Erro - 404)
+GET {{baseUrl}}/restaurantes/9999

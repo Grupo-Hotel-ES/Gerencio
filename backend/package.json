@@ -1,0 +1,40 @@
+{
+  "name": "@geroncio/backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend do Gerôncio em microsserviços (pnpm workspace)",
+  "license": "ISC",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm db:up && pnpm db:deploy && pnpm db:generate && pnpm dev:apis",
+    "dev:apis": "pnpm --parallel --filter \"./api-*\" dev",
+    "start": "pnpm --parallel --filter \"./api-*\" start",
+    "typecheck": "pnpm -r typecheck",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose --profile chatbot down",
+    "docker:logs": "docker compose logs -f",
+    "chatbot:up": "docker compose up -d --build chatbot evolution-api llm",
+    "chatbot:up:gpu": "docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build chatbot evolution-api llm",
+    "chatbot:down": "docker compose stop chatbot evolution-api llm",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose stop postgres",
+    "db:generate": "prisma generate --schema packages/shared-db/prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema packages/shared-db/prisma/schema.prisma",
+    "db:deploy": "prisma migrate deploy --schema packages/shared-db/prisma/schema.prisma",
+    "db:studio": "prisma studio --schema packages/shared-db/prisma/schema.prisma"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.24.0",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@11.24.0",
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prisma": "5.22.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  }
+}

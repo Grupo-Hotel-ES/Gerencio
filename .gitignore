@@ -1,0 +1,8 @@
+/node_modules
+/backend/.env.local
+node_modules/
+.env
+.agents/
+.claude/
+.cursor/
+.devin/

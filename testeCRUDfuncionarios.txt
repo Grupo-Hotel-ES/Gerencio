@@ -1,0 +1,123 @@
+#!/bin/bash
+
+API="http://localhost:3335/api"
+
+# Cores
+VERDE='\033[0;32m'
+VERM='\033[0;31m'
+AZUL='\033[0;34m'
+RESET='\033[0m'
+
+# Contadores
+total=0
+ok=0
+falhas=0
+
+# Função para testar
+testar() {
+  local descricao="$1"
+  local metodo="$2"
+  local url="$3"
+  local body="$4"
+  local esperado="$5"
+
+  total=$((total+1))
+
+  if [ -n "$body" ]; then
+    resposta=$(curl -s -w "\n%{http_code}" -X "$metodo" "$url" \
+      -H "Content-Type: application/json" -d "$body")
+  else
+    resposta=$(curl -s -w "\n%{http_code}" -X "$metodo" "$url")
+  fi
+
+  codigo=$(echo "$resposta" | tail -n1)
+  corpo=$(echo "$resposta" | sed '$d')
+
+  if [ "$codigo" = "$esperado" ]; then
+    ok=$((ok+1))
+    echo -e "${VERDE}✅ $descricao (HTTP $codigo)${RESET}"
+  else
+    falhas=$((falhas+1))
+    echo -e "${VERM}❌ $descricao — esperado $esperado, recebido $codigo${RESET}"
+    echo "   Resposta: $corpo"
+  fi
+
+  # Devolve o corpo para captura
+  echo "$corpo" > /tmp/test_response.json
+}
+
+echo ""
+echo -e "${AZUL}=========================================${RESET}"
+echo -e "${AZUL}  TESTES CRUD - FUNCIONARIOS${RESET}"
+echo -e "${AZUL}=========================================${RESET}"
+echo ""
+
+# ============================================
+# FUNCIONARIOS
+# ============================================
+echo -e "${AZUL}▶ FUNCIONARIOS${RESET}"
+echo ""
+
+# Health check
+testar "Health check da API" GET "http://localhost:3335/health" "" "200"
+
+# Criar funcionario 1 (entregador)
+testar "Criar funcionario 1 (entregador)" POST "$API/funcionarios" \
+  '{"nome":"Joao Silva","cpf":"111.111.111-11","telefone":"(12) 98888-7777","email":"joao@geroncio.com","tipo":"ENTREGADOR","status":"disponivel"}' \
+  "201"
+
+F1_ID=$(cat /tmp/test_response.json | jq -r '.id')
+echo -e "   ${AZUL}→ ID criado: $F1_ID${RESET}"
+
+# Criar funcionario 2 (proprietario)
+testar "Criar funcionario 2 (proprietario)" POST "$API/funcionarios" \
+  '{"nome":"Maria Souza","cpf":"222.222.222-22","telefone":"(12) 97777-6666","email":"maria@geroncio.com","tipo":"PROPRIETARIO"}' \
+  "201"
+
+F2_ID=$(cat /tmp/test_response.json | jq -r '.id')
+echo -e "   ${AZUL}→ ID criado: $F2_ID${RESET}"
+
+# Listar
+testar "Listar todos os funcionarios" GET "$API/funcionarios" "" "200"
+
+# Buscar por ID
+testar "Buscar funcionario $F1_ID" GET "$API/funcionarios/$F1_ID" "" "200"
+
+# Atualizar status (mudar de disponivel para em_entrega)
+testar "Atualizar status do funcionario $F1_ID" PUT "$API/funcionarios/$F1_ID" \
+  '{"nome":"Joao Silva","cpf":"111.111.111-11","telefone":"(12) 98888-7777","email":"joao@geroncio.com","tipo":"ENTREGADOR","status":"em_entrega"}' \
+  "200"
+
+# Erros
+testar "Criar sem CPF (400)" POST "$API/funcionarios" '{"nome":"Sem CPF"}' "400"
+testar "Criar com CPF duplicado (400)" POST "$API/funcionarios" \
+  '{"nome":"Joao Duplicado","cpf":"111.111.111-11","telefone":"(12) 90000-0000","email":"dup@geroncio.com","tipo":"ENTREGADOR","status":"disponivel"}' \
+  "400"
+testar "Buscar ID inexistente (404)" GET "$API/funcionarios/99999" "" "404"
+testar "Buscar ID invalido (400)" GET "$API/funcionarios/abc" "" "400"
+testar "Rota inexistente (404)" GET "http://localhost:3335/rota-que-nao-existe" "" "404"
+
+echo ""
+
+# ============================================
+# LIMPEZA
+# ============================================
+echo -e "${AZUL}▶ LIMPEZA${RESET}"
+echo ""
+
+testar "Deletar funcionario $F1_ID" DELETE "$API/funcionarios/$F1_ID" "" "204"
+testar "Deletar funcionario $F2_ID" DELETE "$API/funcionarios/$F2_ID" "" "204"
+
+echo ""
+
+# ============================================
+# RESULTADO
+# ============================================
+echo -e "${AZUL}=========================================${RESET}"
+echo -e "${AZUL}  RESULTADO${RESET}"
+echo -e "${AZUL}=========================================${RESET}"
+echo ""
+echo -e "  Total:   $total"
+echo -e "  ${VERDE}OK:      $ok${RESET}"
+echo -e "  ${VERM}Falhas:  $falhas${RESET}"
+echo ""

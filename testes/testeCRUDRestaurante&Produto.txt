@@ -1,0 +1,172 @@
+#!/bin/bash
+
+API="http://localhost:3003/api"
+
+# Cores
+VERDE='\033[0;32m'
+VERM='\033[0;31m'
+AZUL='\033[0;34m'
+RESET='\033[0m'
+
+# Contadores
+total=0
+ok=0
+falhas=0
+
+# Função para testar
+testar() {
+  local descricao="$1"
+  local metodo="$2"
+  local url="$3"
+  local body="$4"
+  local esperado="$5"
+  
+  total=$((total+1))
+  
+  if [ -n "$body" ]; then
+    resposta=$(curl -s -w "\n%{http_code}" -X "$metodo" "$url" \
+      -H "Content-Type: application/json" -d "$body")
+  else
+    resposta=$(curl -s -w "\n%{http_code}" -X "$metodo" "$url")
+  fi
+  
+  codigo=$(echo "$resposta" | tail -n1)
+  corpo=$(echo "$resposta" | sed '$d')
+  
+  if [ "$codigo" = "$esperado" ]; then
+    ok=$((ok+1))
+    echo -e "${VERDE}✅ $descricao (HTTP $codigo)${RESET}"
+  else
+    falhas=$((falhas+1))
+    echo -e "${VERM}❌ $descricao — esperado $esperado, recebido $codigo${RESET}"
+    echo "   Resposta: $corpo"
+  fi
+  
+  # Devolve o corpo para captura
+  echo "$corpo" > /tmp/test_response.json
+}
+
+echo ""
+echo -e "${AZUL}=========================================${RESET}"
+echo -e "${AZUL}  TESTES CRUD - RESTAURANTES E PRODUTOS${RESET}"
+echo -e "${AZUL}=========================================${RESET}"
+echo ""
+
+# ============================================
+# RESTAURANTES
+# ============================================
+echo -e "${AZUL}▶ RESTAURANTES${RESET}"
+echo ""
+
+# Criar restaurante 1
+testar "Criar restaurante 1" POST "$API/restaurantes" \
+  '{"cnpj":"33.333.333/0001-33","nome":"Pizzaria A","email":"a@a.com","telefone":"11999999999","cep":"01310-100","cidade":"SP","endereco":"Rua A, 1"}' \
+  "201"
+
+# Captura o ID criado
+R1_ID=$(cat /tmp/test_response.json | jq -r '.id')
+echo -e "   ${AZUL}→ ID criado: $R1_ID${RESET}"
+
+# Criar restaurante 2
+testar "Criar restaurante 2" POST "$API/restaurantes" \
+  '{"cnpj":"44.444.444/0001-44","nome":"Pizzaria B","email":"b@b.com","telefone":"11988888888","cep":"01310-200","cidade":"SP","endereco":"Rua B, 2"}' \
+  "201"
+
+R2_ID=$(cat /tmp/test_response.json | jq -r '.id')
+echo -e "   ${AZUL}→ ID criado: $R2_ID${RESET}"
+
+# Listar
+testar "Listar todos os restaurantes" GET "$API/restaurantes" "" "200"
+
+# Buscar por ID
+testar "Buscar restaurante $R1_ID" GET "$API/restaurantes/$R1_ID" "" "200"
+
+# Atualizar
+testar "Atualizar restaurante $R1_ID" PUT "$API/restaurantes/$R1_ID" \
+  '{"cnpj":"33.333.333/0001-33","nome":"Pizzaria A - NOVA","email":"novo@a.com","telefone":"11977777777","cep":"01310-300","cidade":"SP","endereco":"Rua A, 100"}' \
+  "200"
+
+# Erros
+testar "Criar sem campos (400)" POST "$API/restaurantes" '{"nome":"X"}' "400"
+testar "Buscar ID inexistente (404)" GET "$API/restaurantes/99999" "" "404"
+testar "Buscar ID inválido (400)" GET "$API/restaurantes/abc" "" "400"
+
+echo ""
+
+# ============================================
+# PRODUTOS
+# ============================================
+echo -e "${AZUL}▶ PRODUTOS${RESET}"
+echo ""
+
+# Criar produto 1
+testar "Criar produto 1" POST "$API/produtos" \
+  '{"nome":"Pizza Margherita","preco":49.90}' "201"
+
+P1_ID=$(cat /tmp/test_response.json | jq -r '.id')
+echo -e "   ${AZUL}→ ID criado: $P1_ID${RESET}"
+
+# Criar produto 2
+testar "Criar produto 2" POST "$API/produtos" \
+  '{"nome":"Refrigerante 2L","preco":12.00}' "201"
+
+P2_ID=$(cat /tmp/test_response.json | jq -r '.id')
+echo -e "   ${AZUL}→ ID criado: $P2_ID${RESET}"
+
+# Listar
+testar "Listar todos os produtos" GET "$API/produtos" "" "200"
+
+# Buscar por ID
+testar "Buscar produto $P1_ID" GET "$API/produtos/$P1_ID" "" "200"
+
+# Atualizar
+testar "Atualizar produto $P1_ID" PUT "$API/produtos/$P1_ID" \
+  '{"nome":"Pizza Especial","preco":59.90}' "200"
+
+# Erros
+testar "Criar sem nome (400)" POST "$API/produtos" '{"preco":10}' "400"
+testar "Buscar ID inexistente (404)" GET "$API/produtos/99999" "" "404"
+testar "Buscar ID inválido (400)" GET "$API/produtos/xyz" "" "400"
+
+echo ""
+
+# ============================================
+# RELAÇÃO PRODUTO ↔ RESTAURANTE
+# ============================================
+echo -e "${AZUL}▶ RELAÇÃO ESTOQUE${RESET}"
+echo ""
+
+testar "Adicionar produto $P1_ID ao restaurante $R1_ID" POST \
+  "$API/restaurantes/$R1_ID/estoque" \
+  "{\"produtoId\":$P1_ID,\"quantidade\":50}" "201"
+
+testar "Ver estoque do restaurante $R1_ID" GET \
+  "$API/restaurantes/$R1_ID/estoque" "" "200"
+
+echo ""
+
+# ============================================
+# LIMPEZA
+# ============================================
+echo -e "${AZUL}▶ LIMPEZA${RESET}"
+echo ""
+
+testar "Deletar produto $P2_ID" DELETE "$API/produtos/$P2_ID" "" "204"
+testar "Deletar produto $P1_ID" DELETE "$API/produtos/$P1_ID" "" "204"
+testar "Deletar restaurante $R2_ID" DELETE "$API/restaurantes/$R2_ID" "" "204"
+testar "Deletar restaurante $R1_ID" DELETE "$API/restaurantes/$R1_ID" "" "204"
+
+echo ""
+
+# ============================================
+# RESULTADO
+# ============================================
+echo -e "${AZUL}=========================================${RESET}"
+echo -e "${AZUL}  RESULTADO${RESET}"
+echo -e "${AZUL}=========================================${RESET}"
+echo ""
+echo -e "  Total:   $total"
+echo -e "  ${VERDE}OK:      $ok${RESET}"
+echo -e "  ${VERM}Falhas:  $falhas${RESET}"
+echo ""
+

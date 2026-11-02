@@ -1,0 +1,12 @@
+{
+  "name": "mock-99food",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^20.14.0"
+  }
+}
