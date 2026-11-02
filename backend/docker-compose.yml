@@ -98,8 +98,11 @@ services:
   # Workflows do chatbot. Usa o SQLite interno do n8n (volume próprio) para não
   # criar tabelas no banco do Prisma. Dentro da rede do compose, as APIs ficam
   # em http://api-<nome>:<porta>/api (ex.: http://api-pedidos:3002/api).
+  # Os serviços do chatbot (chatbot, evolution-api e llm) ficam no profile
+  # "chatbot": não sobem com `pnpm backend:docker`, só com `pnpm chatbot`.
   chatbot:
     container_name: geroncio-chatbot
+    profiles: [chatbot]
     restart: unless-stopped
     build:
       context: ./chatbot
@@ -123,6 +126,7 @@ services:
   # um .env dentro do container.
   evolution-api:
     container_name: evolution_api
+    profiles: [chatbot]
     image: evoapicloud/evolution-api:v2.3.7
     restart: unless-stopped
     depends_on:
@@ -145,8 +149,7 @@ services:
 
   # LLM local do chatbot. O modelo vem de OLLAMA_MODEL e é baixado na primeira
   # subida (fica no volume). O n8n acessa em http://llm:11434 (nó "Ollama").
-  # Fica no profile "chatbot": não sobe com `pnpm backend:docker`, só com
-  # `pnpm chatbot` (ou `pnpm chatbot:up:gpu` em backend/, com o override da GPU).
+  # Para usar GPU NVIDIA, suba com `pnpm chatbot:up:gpu` em backend/.
   llm:
     container_name: geroncio-llm
     profiles: [chatbot]
