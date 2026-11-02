@@ -49,8 +49,11 @@ Estas telas já estão integradas à navegação do painel principal e podem ser
 | **Pedidos** | `/` | Dashboard principal de pedidos em tempo real |
 | **Estoque** | `/estoque` | Gestão de produtos, quantidades e sincronização |
 | **Relatórios** | `/relatorios` | Gráficos e métricas de vendas e faturamento |
-| **Rotas** | `/rotas` | Gestão de entregas, paradas e entregadores próprios |
-| **Configurações** | `/configuracoes` | Abas de Estabelecimento, Usuários, Integrações e Preferências |
+| **Motoboys** | `/motoboys` | Gestão da equipe de entregadores |
+| **Rotas** | `/rotas` | Gestão de entregas, paradas e rotas otimizadas |
+| **Configurações** | `/configuracoes` | Estabelecimento, Usuários, Integrações, Preferências e Assinatura |
+| **Perfil** | `/perfil` | Dados pessoais e do restaurante (acessível pelo avatar no topo ou na sidebar) |
+| **Pagamento / Assinatura** | `/assinatura/pagamento` (ou `/pagamento`) | Fluxo de pagamento (Cartão / Pix, Revisão, QR Code, Sucesso e Falha) |
 
 ---
 

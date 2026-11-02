@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Switch, TextInput, View } from 'react-native';
 
@@ -7,13 +8,14 @@ import { Fonts } from '@/constants/theme';
 import { Espacamento, Raio } from '@/constants/tokens';
 import { useCores } from '@/hooks/use-cores';
 
-type AbaConfiguracao = 'estabelecimento' | 'usuarios' | 'integracoes' | 'preferencias';
+type AbaConfiguracao = 'estabelecimento' | 'usuarios' | 'integracoes' | 'preferencias' | 'assinatura';
 
 const ABAS: { id: AbaConfiguracao; rotulo: string }[] = [
   { id: 'estabelecimento', rotulo: 'Estabelecimento' },
   { id: 'usuarios', rotulo: 'Usuários e permissões' },
   { id: 'integracoes', rotulo: 'Integrações' },
   { id: 'preferencias', rotulo: 'Preferências' },
+  { id: 'assinatura', rotulo: 'Assinatura' },
 ];
 
 const CANAIS_INTEGRACOES = [
@@ -92,6 +94,10 @@ export default function Configuracoes() {
     preferencias: {
       titulo: 'Preferências',
       subtitulo: 'Ajuste o comportamento do estoque e os avisos da sua operação.',
+    },
+    assinatura: {
+      titulo: 'Assinatura',
+      subtitulo: 'Gerencie seu plano, pagamentos e dados de cobrança.',
     },
   };
 
@@ -686,6 +692,96 @@ export default function Configuracoes() {
                 </Texto>
                 <TextInput value={emailAvisos} onChangeText={setEmailAvisos} style={estiloCampo} />
               </View>
+            </Cartao>
+          </View>
+        </View>
+      )}
+
+      {/* ABA 5: ASSINATURA */}
+      {abaAtiva === 'assinatura' && (
+        <View style={[styles.layoutColunas, !emColunas && styles.layoutEmpilhado]}>
+          <View style={styles.colunaPrincipal}>
+            <Cartao style={styles.cartaoForm}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: Espacamento.small }}>
+                <View style={{ gap: 4 }}>
+                  <Texto accessibilityRole="header" tamanho={18} peso={600}>
+                    Plano atual
+                  </Texto>
+                  <Texto tamanho={13} cor="textoSecundario">
+                    Seu estabelecimento possui acesso completo à plataforma.
+                  </Texto>
+                </View>
+                <Etiqueta rotulo="Plano ativo" corPonto={cores.statusEntregue} />
+              </View>
+
+              <Divisor />
+
+              <View style={{ gap: Espacamento.small }}>
+                <Texto tamanho={22} peso={700}>
+                  Gerêncio • Essencial
+                </Texto>
+                <Texto tamanho={18} peso={600} cor="brand">
+                  R$ 149,00 / mês
+                </Texto>
+                <Texto tamanho={13} cor="textoSecundario">
+                  Próxima renovação em 10 nov. 2026.
+                </Texto>
+              </View>
+
+              <View style={{ gap: Espacamento.xsmall }}>
+                <Texto tamanho={13} cor="textoSecundario">✓ 1 unidade + 5 usuários</Texto>
+                <Texto tamanho={13} cor="textoSecundario">✓ Itens ilimitados</Texto>
+                <Texto tamanho={13} cor="textoSecundario">✓ Fichas técnicas e fornecedores</Texto>
+                <Texto tamanho={13} cor="textoSecundario">✓ Relatórios completos</Texto>
+              </View>
+
+              <Divisor />
+
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Espacamento.medium }}>
+                <Botao
+                  rotulo="Ir para dados de pagamento"
+                  icone="cartao"
+                  variante="primario"
+                  onPress={() => router.push('/assinatura/pagamento' as any)}
+                />
+              </View>
+            </Cartao>
+
+            <Cartao style={styles.cartaoForm}>
+              <Texto accessibilityRole="header" tamanho={18} peso={600}>
+                Histórico de cobranças
+              </Texto>
+              <Texto tamanho={13} cor="textoSecundario">
+                Consulte e baixe seus comprovantes anteriores.
+              </Texto>
+
+              <View style={styles.linhaUsuario}>
+                <View style={{ flex: 1 }}>
+                  <Texto tamanho={15} peso={600}>GER-2026-1048 • R$ 149,00</Texto>
+                  <Texto tamanho={13} cor="textoSecundario">11 out. 2026 • Pix confirmado</Texto>
+                </View>
+                <Botao
+                  rotulo="Ver comprovante"
+                  icone="baixar"
+                  onPress={() => router.push('/assinatura/pagamento' as any)}
+                />
+              </View>
+            </Cartao>
+          </View>
+
+          <View style={styles.colunaLateral}>
+            <Cartao style={styles.cartaoLateral}>
+              <Texto accessibilityRole="header" tamanho={18} peso={600}>
+                Dúvidas sobre cobrança?
+              </Texto>
+              <Texto tamanho={13} cor="textoSecundario" style={{ lineHeight: 18 }}>
+                Você pode alternar entre Cartão de crédito e Pix a qualquer momento com total segurança.
+              </Texto>
+              <Botao
+                rotulo="Acessar checkout"
+                icone="cartao"
+                onPress={() => router.push('/assinatura/pagamento' as any)}
+              />
             </Cartao>
           </View>
         </View>
