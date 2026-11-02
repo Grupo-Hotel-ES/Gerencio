@@ -48,6 +48,9 @@ const ICONES = {
   check: { ios: 'checkmark.circle', android: 'check_circle', web: 'check_circle' },
   setaDireita: { ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' },
   cadeado: { ios: 'lock', android: 'lock', web: 'lock' },
+  loja: { ios: 'storefront', android: 'storefront', web: 'storefront' },
+  subir: { ios: 'chevron.up', android: 'keyboard_arrow_up', web: 'keyboard_arrow_up' },
+  mapa: { ios: 'map', android: 'map', web: 'map' },
 } as const satisfies Record<string, SymbolViewProps['name']>;
 
 export type NomeIcone = keyof typeof ICONES;

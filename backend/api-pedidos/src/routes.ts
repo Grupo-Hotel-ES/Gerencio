@@ -3,6 +3,8 @@ import {
   db,
   parseId,
   StatusPedido,
+  StatusEntregador,
+  TipoFuncionario,
   ErroOperacao,
   prepararItensPedido,
   mudarStatusPedido,
@@ -186,12 +188,13 @@ routes.post('/pedidos', async (req, res) => {
       distanciaKm === undefined || distanciaKm === null ? undefined : Number(distanciaKm)
 
     const canal = app.trim().toLowerCase()
-    const ehWhatsapp = canal === 'whatsapp'
+    // Canais próprios: o restaurante entrega e cobra o frete. Nos apps, o frete já vem da plataforma.
+    const ehCanalProprio = ['whatsapp', 'balcao'].includes(canal)
     const ehRetirada = !cepDestino.trim() || enderecoDestino.trim().toLowerCase() === 'retirada no local'
 
-    // Para pedidos de entrega via WhatsApp, calcula automaticamente a distância pelas vias
-    // e a taxa segundo as regras do restaurante (nos outros apps, o frete já vem definido pela plataforma).
-    if (ehWhatsapp && !ehRetirada && (custoEntregaFinal === undefined || distanciaKmFinal === undefined)) {
+    // Para entregas dos canais próprios, calcula a distância pelas vias e a taxa segundo as
+    // regras do restaurante, a menos que o frete já venha cotado (chatbot, formulário do painel).
+    if (ehCanalProprio && !ehRetirada && (custoEntregaFinal === undefined || distanciaKmFinal === undefined)) {
       let idRest = restauranteId ? Number(restauranteId) : null
 
       if (!idRest) {
@@ -211,6 +214,8 @@ routes.post('/pedidos', async (req, res) => {
           cepDestino,
           latitude: latitudeFinal,
           longitude: longitudeFinal,
+        }).catch((error: Error) => {
+          throw new ErroOperacao(400, `Não foi possível calcular o frete: ${error.message}`)
         })
 
         if (!cotacao.dentroDaAreaEntrega || cotacao.taxaEntrega === null) {
@@ -311,7 +316,7 @@ routes.patch('/pedidos/:id/status', async (req, res) => {
     })
 
     // Sincroniza status do entregador se houver entrega vinculada
-    if (pedido.entrega?.entregadorId) {
+    if (pedido?.entrega?.entregadorId) {
       if (status === StatusPedido.saiu_para_entrega) {
         await db.funcionario.update({
           where: { id: pedido.entrega.entregadorId },

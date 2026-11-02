@@ -28,7 +28,9 @@ export type Pedido = {
   itens: string[];
   entrega: string;
   status: StatusAtivo;
+  /** Itens + taxa de entrega. */
   total: number;
+  taxaEntrega: number;
   pagamento: SituacaoPagamento;
   /** Pedidos próprios (WhatsApp, balcão) podem receber link de pagamento; os das plataformas não. */
   aceitaLinkPagamento: boolean;

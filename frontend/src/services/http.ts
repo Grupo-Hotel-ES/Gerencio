@@ -5,9 +5,9 @@ export class ErroApi extends Error {
 }
 
 /** Cada serviço informa sua URL; erros do backend são apresentados em português. */
-export async function requisitarApi<T>(base: string, caminho: string, init?: RequestInit): Promise<T> {
+export async function requisitarApi<T>(base: string, caminho: string, init?: RequestInit, tempoLimiteMs = 15_000): Promise<T> {
   const controle = new AbortController();
-  const tempo = setTimeout(() => controle.abort(), 15_000);
+  const tempo = setTimeout(() => controle.abort(), tempoLimiteMs);
   try {
     const resposta = await fetch(`${base.replace(/\/$/, '')}${caminho}`, { ...init, signal: controle.signal });
     const corpo = resposta.status === 204 ? null : await resposta.json();
