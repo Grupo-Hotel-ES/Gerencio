@@ -1,7 +1,9 @@
-import { Link, router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { Link, router, useLocalSearchParams } from 'expo-router';
+import { openBrowserAsync } from 'expo-web-browser';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   TextInput,
@@ -19,10 +21,28 @@ import {
 import { Fonts } from '@/constants/theme';
 import { Espacamento, Raio } from '@/constants/tokens';
 import { useCores } from '@/hooks/use-cores';
+import {
+  buscarConfigPagamento,
+  consultarCheckout,
+  criarCheckout,
+  resultadoDaSessao,
+  type MetodoPagamento,
+  type SessaoCheckout,
+} from '@/services/api-pagamentos';
 
-type MetodoPagamento = 'cartao' | 'pix';
 type PassoFluxo = 1 | 2 | 3;
 type EtapaPagamento = 'processando' | 'aguardando_pix' | 'sucesso' | 'falha';
+
+// No celular o Stripe não volta para o app: a página de retorno é a versão web.
+const URL_RETORNO_NATIVO =
+  process.env.EXPO_PUBLIC_URL_RETORNO_PAGAMENTO ?? 'http://localhost:8081/assinatura/pagamento';
+
+function urlDeRetorno() {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return `${window.location.origin}${window.location.pathname}`;
+  }
+  return URL_RETORNO_NATIVO;
+}
 
 const CODIGO_PIX_EXEMPLO =
   '000201-GERENCIO-DEMONSTRACAO-SEM-VALOR-14900-GER20261048';
@@ -81,11 +101,25 @@ export default function PagamentoAssinatura() {
   const cores = useCores();
   const larguraConteudo = useLarguraConteudo();
   const emColunas = larguraConteudo >= 980;
+  const parametros = useLocalSearchParams<{ sessao?: string; cancelado?: string }>();
 
-  // Estado geral do fluxo
-  const [passo, setPasso] = useState<PassoFluxo>(1);
+  // Estado geral do fluxo (na volta do Stripe, começa no passo correspondente)
+  const [passo, setPasso] = useState<PassoFluxo>(
+    parametros.sessao ? 3 : parametros.cancelado ? 2 : 1,
+  );
   const [metodo, setMetodo] = useState<MetodoPagamento>('cartao');
-  const [etapaPagamento, setEtapaPagamento] = useState<EtapaPagamento>('aguardando_pix');
+  const [etapaPagamento, setEtapaPagamento] = useState<EtapaPagamento>(
+    parametros.sessao ? 'processando' : 'aguardando_pix',
+  );
+
+  // Stripe: sem chaves no backend (ou sem api-pagamentos), a tela fica em modo demonstração
+  const [stripeAtivo, setStripeAtivo] = useState(false);
+  const [sessao, setSessao] = useState<SessaoCheckout | null>(null);
+  const [urlCheckout, setUrlCheckout] = useState<string | null>(null);
+  const [erroPagamento, setErroPagamento] = useState<string | null>(
+    parametros.cancelado ? 'Pagamento cancelado. Nenhum valor foi cobrado.' : null,
+  );
+  const [verificando, setVerificando] = useState(Boolean(parametros.sessao));
 
   // Dados do cartão
   const [numeroCartao, setNumeroCartao] = useState('4242 4242 4242 4242');
@@ -106,6 +140,45 @@ export default function PagamentoAssinatura() {
   // Estados interativos do Pix
   const [copiado, setCopiado] = useState(false);
   const [segundosRestantes, setSegundosRestantes] = useState(1800); // 30 minutos
+
+  useEffect(() => {
+    buscarConfigPagamento().then((config) => setStripeAtivo(config?.configurado ?? false));
+  }, []);
+
+  /** Consulta a sessão no Stripe e leva a tela para a etapa correspondente. */
+  const verificarPagamento = useCallback(
+    (id: string) =>
+      consultarCheckout(id)
+        .then((atual) => {
+          setSessao(atual);
+          if (atual.metodo) setMetodo(atual.metodo);
+          const resultado = resultadoDaSessao(atual);
+          if (resultado === 'sucesso') {
+            setPasso(3);
+            setEtapaPagamento('sucesso');
+          } else if (resultado === 'falha') {
+            setPasso(3);
+            setEtapaPagamento('falha');
+          } else if (atual.metodo === 'pix') {
+            setPasso(3);
+            setEtapaPagamento('aguardando_pix');
+          } else {
+            setPasso(2);
+            setErroPagamento('O pagamento não foi concluído. Revise os dados e tente novamente.');
+          }
+        })
+        .catch((erro) => {
+          setPasso(2);
+          setErroPagamento(erro instanceof Error ? erro.message : 'Não foi possível consultar o pagamento.');
+        })
+        .finally(() => setVerificando(false)),
+    [],
+  );
+
+  // Volta do Stripe Checkout com ?sessao=cs_... (o ?cancelado=1 já define o estado inicial)
+  useEffect(() => {
+    if (parametros.sessao) verificarPagamento(parametros.sessao);
+  }, [parametros.sessao, verificarPagamento]);
 
   // Contador regressivo para o Pix
   useEffect(() => {
@@ -130,9 +203,36 @@ export default function PagamentoAssinatura() {
     setTimeout(() => setCopiado(false), 2500);
   };
 
-  const iniciarPagamento = () => {
+  const iniciarPagamento = async () => {
     setPasso(3);
     setEtapaPagamento('processando');
+    setErroPagamento(null);
+
+    if (stripeAtivo) {
+      try {
+        const checkout = await criarCheckout({
+          metodo,
+          email: emailCobranca,
+          urlRetorno: urlDeRetorno(),
+          estabelecimento,
+          razaoSocial,
+          cnpj,
+          responsavel,
+        });
+        setUrlCheckout(checkout.url);
+        if (Platform.OS === 'web') {
+          // O Stripe redireciona de volta com ?sessao=... (tratado no efeito acima)
+          window.location.assign(checkout.url);
+          return;
+        }
+        await openBrowserAsync(checkout.url);
+        await verificarPagamento(checkout.id);
+      } catch (erro) {
+        setPasso(2);
+        setErroPagamento(erro instanceof Error ? erro.message : 'Não foi possível iniciar o pagamento.');
+      }
+      return;
+    }
 
     setTimeout(() => {
       if (metodo === 'pix') {
@@ -393,7 +493,21 @@ export default function PagamentoAssinatura() {
                 </View>
 
                 {/* Conteúdo específico: Cartão */}
-                {metodo === 'cartao' && (
+                {metodo === 'cartao' && stripeAtivo && (
+                  <View style={styles.blocoCampos}>
+                    <Cartao style={[styles.avisoCaixa, { backgroundColor: cores.fundo }]}>
+                      <Icone nome="cadeado" tamanho={20} />
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Texto peso={600}>Dados do cartão na página segura do Stripe</Texto>
+                        <Texto tamanho={13} cor="textoSecundario">
+                          Depois da revisão, você será levado ao Stripe para informar o cartão. O Gerêncio não recebe nem armazena o número ou o código de segurança.
+                        </Texto>
+                      </View>
+                    </Cartao>
+                  </View>
+                )}
+
+                {metodo === 'cartao' && !stripeAtivo && (
                   <View style={styles.blocoCampos}>
                     <Texto tamanho={12} cor="textoSecundario">
                       * Campos obrigatórios. Dados de teste, sem valor real.
@@ -753,7 +867,9 @@ export default function PagamentoAssinatura() {
                   </View>
 
                   <Texto tamanho={13} cor="textoSecundario" style={{ marginTop: Espacamento.small }}>
-                    {metodo === 'cartao'
+                    {metodo === 'cartao' && stripeAtivo
+                      ? 'Os dados do cartão serão informados na página segura do Stripe. No cartão, a cobrança de R$ 149,00 é mensal e recorrente.'
+                      : metodo === 'cartao'
                       ? 'Cartão de teste final 4242 disponível. No cartão, a cobrança de R$ 149,00 é mensal e recorrente.'
                       : 'Método escolhido: Pix • pagamento do período mensal. Período: 11 out. a 10 nov. 2026. Sem renovação automática pelo Pix. Acesso liberado após a confirmação.'}
                   </Texto>
@@ -766,6 +882,18 @@ export default function PagamentoAssinatura() {
                   />
                 </View>
               </Cartao>
+
+              {erroPagamento && (
+                <Cartao style={[styles.avisoCaixa, { backgroundColor: cores.fundo }]}>
+                  <Icone nome="alerta" tamanho={22} cor={cores.feedbackErro} />
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Texto peso={600}>Pagamento não iniciado</Texto>
+                    <Texto tamanho={13} cor="textoSecundario">
+                      {erroPagamento}
+                    </Texto>
+                  </View>
+                </Cartao>
+              )}
 
               {/* Callout Você está no controle */}
               <Cartao style={[styles.avisoCaixa, { backgroundColor: cores.fundo }]}>
@@ -855,8 +983,47 @@ export default function PagamentoAssinatura() {
                 </Cartao>
               )}
 
-              {/* ESTADO 2: AGUARDANDO PAGAMENTO PIX */}
-              {etapaPagamento === 'aguardando_pix' && (
+              {/* ESTADO 2 (Stripe): PIX GERADO NO CHECKOUT, AINDA SEM CONFIRMAÇÃO */}
+              {etapaPagamento === 'aguardando_pix' && stripeAtivo && (
+                <Cartao style={styles.cartaoPix}>
+                  <View style={styles.cabecalhoPix}>
+                    <Texto tamanho={26} peso={700}>
+                      Pix de R$ 149,00
+                    </Texto>
+                    <Texto tamanho={13} cor="textoSecundario" style={{ textAlign: 'center' }}>
+                      O QR Code e o código copia e cola estão na página do Stripe. Depois de pagar no banco, verifique a confirmação aqui.
+                    </Texto>
+                  </View>
+
+                  <View style={{ gap: Espacamento.medium }}>
+                    <Botao
+                      rotulo={verificando ? 'Verificando...' : 'Verificar pagamento'}
+                      icone="sincronizar"
+                      variante="primario"
+                      disabled={verificando || !sessao}
+                      onPress={() => {
+                        if (!sessao) return;
+                        setVerificando(true);
+                        verificarPagamento(sessao.id);
+                      }}
+                    />
+                    {urlCheckout && (
+                      <Botao
+                        rotulo="Abrir o Pix novamente"
+                        icone="pix"
+                        onPress={() => openBrowserAsync(urlCheckout)}
+                      />
+                    )}
+                    <Botao
+                      rotulo="Voltar à assinatura"
+                      onPress={() => router.push('/configuracoes')}
+                    />
+                  </View>
+                </Cartao>
+              )}
+
+              {/* ESTADO 2: AGUARDANDO PAGAMENTO PIX (demonstração) */}
+              {etapaPagamento === 'aguardando_pix' && !stripeAtivo && (
                 <Cartao style={styles.cartaoPix}>
                   {/* Banner Contador Regressivo */}
                   <View style={[styles.bannerTempo, { backgroundColor: cores.fundo2 }]}>
@@ -1163,7 +1330,9 @@ export default function PagamentoAssinatura() {
           {/* Rodapé geral com nota demonstrativa */}
           <View style={styles.rodapeNota}>
             <Texto tamanho={12} cor="textoSecundario">
-              Dados demonstrativos • nenhuma cobrança real.
+              {stripeAtivo
+                ? 'Pagamento processado pelo Stripe.'
+                : 'Dados demonstrativos • nenhuma cobrança real.'}
             </Texto>
           </View>
         </View>
