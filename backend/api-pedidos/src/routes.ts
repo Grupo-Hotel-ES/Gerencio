@@ -148,9 +148,9 @@ routes.post('/pedidos', async (req, res) => {
 
     const ehWhatsapp = String(app).toLowerCase() === 'whatsapp'
 
-    // Para pedidos via WhatsApp (ou quando restauranteId é enviado sem custoEntrega/distanciaKm),
-    // calcula automaticamente a distância pelas vias e a taxa segundo as regras do restaurante.
-    if ((ehWhatsapp || restauranteId !== undefined) && (custoEntregaFinal === undefined || distanciaKmFinal === undefined)) {
+    // Para pedidos via WhatsApp, calcula automaticamente a distância pelas vias e a taxa
+    // segundo as regras do restaurante (nos outros apps, o frete já vem definido pela plataforma).
+    if (ehWhatsapp && (custoEntregaFinal === undefined || distanciaKmFinal === undefined)) {
       let idRest = restauranteId ? Number(restauranteId) : null
 
       if (!idRest) {
