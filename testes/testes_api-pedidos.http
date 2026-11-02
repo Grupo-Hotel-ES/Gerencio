@@ -84,3 +84,71 @@ GET {{baseUrl}}/pedidos/abc
 
 ### 8. Buscar Pedido Inexistente (Tratamento de Erro - 404)
 GET {{baseUrl}}/pedidos/9999
+
+###
+### ============================================
+### ENTREGADORES (MOTOBOYS)
+### ============================================
+
+### 9. Listar Todos os Entregadores (GET)
+GET {{baseUrl}}/entregadores
+
+###
+### 10. Listar Entregadores com Filtro de Status (GET)
+GET {{baseUrl}}/entregadores?status=disponivel,em_entrega
+
+###
+### 11. Criar Entregador (POST)
+# @name createEntregador
+POST {{baseUrl}}/entregadores
+Content-Type: application/json
+
+{
+  "nome": "Carlos Oliveira Santos",
+  "cpf": "123.456.789-00",
+  "telefone": "(11) 98765-4321",
+  "email": "carlos.motoboy@email.com",
+  "placa": "ABC-1234",
+  "status": "disponivel"
+}
+
+###
+### 12. Buscar Entregador por ID (GET)
+GET {{baseUrl}}/entregadores/1
+
+###
+### 13. Atualizar Entregador (PUT)
+PUT {{baseUrl}}/entregadores/1
+Content-Type: application/json
+
+{
+  "nome": "Carlos Oliveira Santos Júnior",
+  "cpf": "123.456.789-00",
+  "telefone": "(11) 99999-8888",
+  "email": "carlos.junior@email.com",
+  "placa": "XYZ-9876",
+  "status": "em_entrega"
+}
+
+###
+### 14. Atualizar Apenas Status do Entregador (PATCH)
+PATCH {{baseUrl}}/entregadores/1/status
+Content-Type: application/json
+
+{
+  "status": "inativo"
+}
+
+###
+### 15. Vincular Entregador ao Pedido (PATCH)
+PATCH {{baseUrl}}/pedidos/1/entregador
+Content-Type: application/json
+
+{
+  "entregadorId": 1,
+  "custoEntrega": 12.50
+}
+
+###
+### 16. Deletar Entregador (DELETE)
+DELETE {{baseUrl}}/entregadores/1
