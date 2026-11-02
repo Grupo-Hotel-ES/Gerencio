@@ -10,11 +10,12 @@ export type StatusPedido =
   | 'cancelado';
 
 /** Status que aparecem na fila do dashboard. */
-export const STATUS_ATIVOS = ['novo', 'em_preparo', 'pronto'] as const satisfies StatusPedido[];
+export const STATUS_ATIVOS = ['novo', 'em_preparo', 'pronto', 'saiu_para_entrega'] as const satisfies StatusPedido[];
 export type StatusAtivo = (typeof STATUS_ATIVOS)[number];
 
 export type Pedido = {
   numero: number;
+  restaurante: string;
   canal: string;
   cliente: string;
   horario: string;
@@ -40,6 +41,12 @@ export const STATUS: Record<
     cor: 'statusPronto',
     acao: 'Confirmar saída',
     proximo: 'saiu_para_entrega',
+  },
+  saiu_para_entrega: {
+    rotulo: 'Em entrega',
+    cor: 'statusNovo',
+    acao: 'Confirmar entrega',
+    proximo: 'entregue',
   },
 };
 

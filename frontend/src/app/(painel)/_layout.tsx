@@ -5,6 +5,7 @@ import { StyleSheet, View } from 'react-native';
 import { LarguraConteudoProvider } from '@/components/dashboard/pagina';
 import { NavegacaoCompacta, Sidebar } from '@/components/dashboard/sidebar';
 import { TopBar } from '@/components/dashboard/top-bar';
+import { PerfilProvider } from '@/data/perfil-context';
 import { useCores } from '@/hooks/use-cores';
 
 const LARGURA_SIDEBAR = 224;
@@ -17,19 +18,21 @@ export default function PainelLayout() {
   const comSidebar = largura >= 960;
 
   return (
-    <View
-      style={[styles.raiz, { backgroundColor: cores.fundo }]}
-      onLayout={(e) => setLargura(e.nativeEvent.layout.width)}>
-      {comSidebar && <Sidebar />}
+    <PerfilProvider>
+      <View
+        style={[styles.raiz, { backgroundColor: cores.fundo }]}
+        onLayout={(e) => setLargura(e.nativeEvent.layout.width)}>
+        {comSidebar && <Sidebar />}
 
-      <View style={styles.principal}>
-        <TopBar />
-        {!comSidebar && <NavegacaoCompacta />}
-        <LarguraConteudoProvider value={largura - (comSidebar ? LARGURA_SIDEBAR : 0)}>
-          <Slot />
-        </LarguraConteudoProvider>
+        <View style={styles.principal}>
+          <TopBar />
+          {!comSidebar && <NavegacaoCompacta />}
+          <LarguraConteudoProvider value={largura - (comSidebar ? LARGURA_SIDEBAR : 0)}>
+            <Slot />
+          </LarguraConteudoProvider>
+        </View>
       </View>
-    </View>
+    </PerfilProvider>
   );
 }
 
