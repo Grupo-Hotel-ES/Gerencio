@@ -1,0 +1,4 @@
+{
+  "extends": "../tsconfig.json",
+  "include": ["ambiente.ts", "fluxos-criticos.test.ts"]
+}

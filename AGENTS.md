@@ -51,7 +51,17 @@ Na raiz (atalhos definidos em `package.json`):
 Dentro de `backend/`: `pnpm typecheck` (roda `tsc --noEmit` em todos os pacotes), `pnpm db:generate`, `pnpm docker:logs`, `pnpm docker:down` (derruba tudo, inclusive o chatbot), `pnpm chatbot:up:gpu`, `pnpm chatbot:down`.
 Dentro de `frontend/`: `pnpm web`, `pnpm android`, `pnpm ios`, `pnpm lint`.
 
-**Antes de concluir uma mudança**, rode `pnpm typecheck` em `backend/` e/ou `pnpm lint` em `frontend/`. Não há testes automatizados; os testes manuais das rotas ficam em `testes/*.http`.
+**Antes de concluir uma mudança**, rode `pnpm typecheck` em `backend/` e/ou `pnpm lint` em `frontend/`. Para mudanças no backend, execute também `pnpm test:integracao` na raiz: usa HTTP real e PostgreSQL em container exclusivo. Os roteiros manuais continuam em `testes/*.http`.
+
+### Regras obrigatórias de testes
+
+- Leia [docs/regras-de-testes.md](docs/regras-de-testes.md) antes de criar ou alterar testes. Use `node:test`, `assert` e `tsx`, já presentes no projeto.
+- Apresente as frases `describe` / `it` em português (“quando ..., então ...”) e espere a confirmação do responsável antes de implementar comportamentos novos.
+- Não apague, pule (`skip`, `todo`, `only`) ou afrouxe testes/asserções para obter aprovação. Se um teste parecer errado, pare e pergunte.
+- Teste a rota HTTP real e o banco de teste real. Simule somente serviços externos; nunca o banco, as regras de negócio ou as permissões sob teste.
+- Falha por bug real permanece falhando e deve ser registrada em [docs/bugs-testes.md](docs/bugs-testes.md). Não mude a aplicação ou a expectativa apenas para ocultar o resultado de uma tarefa de diagnóstico.
+- Execute pela raiz com `pnpm test:integracao`; nunca use bancos/credenciais de desenvolvimento ou produção. Novas migrations precisam de revisão do responsável antes de executar.
+- Preserve os cenários existentes, confira os efeitos no banco e use `Promise.all` para requisições simultâneas. Documente as limitações da cobertura e reporte o resultado real.
 
 ## Backend
 
