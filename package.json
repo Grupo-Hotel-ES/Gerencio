@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node scripts/testar-integracao.mjs",
+    "test:integracao": "node scripts/testar-integracao.mjs",
     "dev": "cd frontend && npx expo start",
     "db": "cd backend && pnpm db:up",
     "studio": "cd backend && pnpm db:studio",
