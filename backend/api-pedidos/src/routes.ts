@@ -3,10 +3,12 @@ import {
   db,
   parseId,
   StatusPedido,
+  StatusPagamentoEntrega,
   ErroOperacao,
   prepararItensPedido,
   mudarStatusPedido,
   cotarFreteRestaurante,
+  calcularValorMotoboy,
 } from '@geroncio/shared-db'
 
 const routes = Router()
@@ -153,6 +155,7 @@ routes.post('/pedidos', async (req, res) => {
     itens,
     entregadorId,
     custoEntrega,
+    valorMotoboy,
     distanciaKm,
     restauranteId,
   } = req.body
@@ -177,11 +180,22 @@ routes.post('/pedidos', async (req, res) => {
     return
   }
 
+  if (
+    valorMotoboy !== undefined &&
+    valorMotoboy !== null &&
+    (isNaN(Number(valorMotoboy)) || Number(valorMotoboy) < 0)
+  ) {
+    res.status(400).json({ error: 'valorMotoboy deve ser um número maior ou igual a zero' })
+    return
+  }
+
   try {
     let latitudeFinal = latitude === undefined || latitude === null ? null : Number(latitude)
     let longitudeFinal = longitude === undefined || longitude === null ? null : Number(longitude)
     let custoEntregaFinal =
       custoEntrega === undefined || custoEntrega === null ? undefined : Number(custoEntrega)
+    let valorMotoboyFinal =
+      valorMotoboy === undefined || valorMotoboy === null ? undefined : Number(valorMotoboy)
     let distanciaKmFinal =
       distanciaKm === undefined || distanciaKm === null ? undefined : Number(distanciaKm)
 
@@ -239,6 +253,7 @@ routes.post('/pedidos', async (req, res) => {
     const deveCriarEntrega =
       entregadorId !== undefined ||
       custoEntregaFinal !== undefined ||
+      valorMotoboyFinal !== undefined ||
       distanciaKmFinal !== undefined
 
     const pedido = await db.$transaction(async (tx) => {
@@ -250,6 +265,18 @@ routes.post('/pedidos', async (req, res) => {
       if (!Number.isFinite(Number(total)) || Number(total) < 0 || Number(total) > 99_999_999.99) {
         throw new ErroOperacao(400, 'Preço do pedido inválido')
       }
+
+      let repasseMotoboyCalculado = valorMotoboyFinal
+      if (deveCriarEntrega && repasseMotoboyCalculado === undefined) {
+        const dadosRestaurante = await tx.restaurante.findUnique({
+          where: { id: preparados.restauranteId },
+          select: { percentualRepasseMotoboy: true },
+        })
+        const percentualRepasse = dadosRestaurante?.percentualRepasseMotoboy ?? 100
+        const custoBase = custoEntregaFinal !== undefined ? custoEntregaFinal : 0
+        repasseMotoboyCalculado = calcularValorMotoboy(custoBase, percentualRepasse)
+      }
+
       return tx.pedido.create({
         data: {
           restauranteId: preparados.restauranteId,
@@ -271,6 +298,9 @@ routes.post('/pedidos', async (req, res) => {
                 ...(entregadorId && { entregadorId: Number(entregadorId) }),
                 ...(distanciaKmFinal !== undefined && { distanciaKm: distanciaKmFinal }),
                 custoEntrega: custoEntregaFinal !== undefined ? custoEntregaFinal : 0,
+                ...(repasseMotoboyCalculado !== undefined && {
+                  valorMotoboy: repasseMotoboyCalculado,
+                }),
               },
             },
           }),
@@ -322,34 +352,87 @@ routes.patch('/pedidos/:id/status', async (req, res) => {
 // 6. ATRIBUIR / ATUALIZAR ENTREGADOR DO PEDIDO
 routes.patch('/pedidos/:id/entregador', async (req, res) => {
   const id = parseId(req.params.id)
-  const { entregadorId, custoEntrega, distanciaKm } = req.body
+  const { entregadorId, custoEntrega, valorMotoboy, distanciaKm } = req.body
+  const idEntregador = parseId(entregadorId !== undefined ? String(entregadorId) : undefined)
 
-  if (id === null || !entregadorId) {
-    res.status(400).json({ error: 'Id do pedido e entregadorId são obrigatórios' })
+  if (id === null || idEntregador === null) {
+    res.status(400).json({ error: 'Id do pedido e entregadorId válidos são obrigatórios' })
+    return
+  }
+
+  if (
+    custoEntrega !== undefined &&
+    custoEntrega !== null &&
+    (isNaN(Number(custoEntrega)) || Number(custoEntrega) < 0)
+  ) {
+    res.status(400).json({ error: 'custoEntrega deve ser um número maior ou igual a zero' })
+    return
+  }
+
+  if (
+    valorMotoboy !== undefined &&
+    valorMotoboy !== null &&
+    (isNaN(Number(valorMotoboy)) || Number(valorMotoboy) < 0)
+  ) {
+    res.status(400).json({ error: 'valorMotoboy deve ser um número maior ou igual a zero' })
     return
   }
 
   try {
-    const pedido = await db.pedido.findUnique({ where: { id } })
+    const [pedido, entregador] = await Promise.all([
+      db.pedido.findUnique({
+        where: { id },
+        include: { entrega: true, restaurante: true },
+      }),
+      db.funcionario.findUnique({ where: { id: idEntregador } }),
+    ])
+
     if (!pedido) {
       res.status(404).json({ error: 'Pedido não encontrado' })
       return
+    }
+    if (!entregador) {
+      res.status(404).json({ error: 'Entregador não encontrado' })
+      return
+    }
+
+    const percentualRepasse = pedido.restaurante?.percentualRepasseMotoboy ?? 100
+    const custoEntregaEfetivo =
+      custoEntrega !== undefined && custoEntrega !== null
+        ? Number(custoEntrega)
+        : pedido.entrega
+          ? Number(pedido.entrega.custoEntrega)
+          : 0
+
+    let valorMotoboyEfetivo: number
+    if (valorMotoboy !== undefined && valorMotoboy !== null) {
+      valorMotoboyEfetivo = Number(valorMotoboy)
+    } else if (
+      custoEntrega !== undefined ||
+      !pedido.entrega ||
+      pedido.entrega.valorMotoboy === null
+    ) {
+      valorMotoboyEfetivo = calcularValorMotoboy(custoEntregaEfetivo, percentualRepasse)
+    } else {
+      valorMotoboyEfetivo = Number(pedido.entrega.valorMotoboy)
     }
 
     const entrega = await db.entrega.upsert({
       where: { pedidoId: id },
       update: {
-        entregadorId: Number(entregadorId),
-        ...(custoEntrega !== undefined && { custoEntrega: Number(custoEntrega) }),
-        ...(distanciaKm !== undefined && { distanciaKm: Number(distanciaKm) }),
+        entregadorId: idEntregador,
+        ...(custoEntrega !== undefined && custoEntrega !== null && { custoEntrega: custoEntregaEfetivo }),
+        valorMotoboy: valorMotoboyEfetivo,
+        ...(distanciaKm !== undefined && distanciaKm !== null && { distanciaKm: Number(distanciaKm) }),
       },
       create: {
         pedidoId: id,
-        entregadorId: Number(entregadorId),
-        custoEntrega: custoEntrega !== undefined ? Number(custoEntrega) : 0,
-        ...(distanciaKm !== undefined && { distanciaKm: Number(distanciaKm) }),
+        entregadorId: idEntregador,
+        custoEntrega: custoEntregaEfetivo,
+        valorMotoboy: valorMotoboyEfetivo,
+        ...(distanciaKm !== undefined && distanciaKm !== null && { distanciaKm: Number(distanciaKm) }),
       },
-      include: { entregador: true },
+      include: { entregador: true, pedido: true },
     })
 
     res.json(entrega)
@@ -414,6 +497,180 @@ function parseDia(valor: unknown): Date | null {
 
 const arredondar = (valor: number) => Math.round(valor * 100) / 100
 
+/** Obtém o valor devido ao motoboy em uma entrega (usa valorMotoboy gravado ou fallback para custoEntrega). */
+function obterValorMotoboyEntrega(entrega: {
+  valorMotoboy: unknown
+  custoEntrega: unknown
+}): number {
+  if (entrega.valorMotoboy !== null && entrega.valorMotoboy !== undefined) {
+    return Number(entrega.valorMotoboy)
+  }
+  return Number(entrega.custoEntrega)
+}
+
+// 8. ATUALIZAR STATUS DE PAGAMENTO DE UMA ENTREGA AO MOTOBOY (pendente | pago)
+routes.patch('/entregas/:id/pagamento', async (req, res) => {
+  const id = parseId(req.params.id)
+  const { statusPagamento, valorMotoboy } = req.body
+
+  if (id === null) {
+    res.status(400).json({ error: 'Id da entrega inválido' })
+    return
+  }
+
+  if (!Object.values(StatusPagamentoEntrega).includes(statusPagamento)) {
+    res.status(400).json({
+      error: `statusPagamento deve ser um de: ${Object.values(StatusPagamentoEntrega).join(', ')}`,
+    })
+    return
+  }
+
+  if (
+    valorMotoboy !== undefined &&
+    valorMotoboy !== null &&
+    (isNaN(Number(valorMotoboy)) || Number(valorMotoboy) < 0)
+  ) {
+    res.status(400).json({ error: 'valorMotoboy deve ser um número maior ou igual a zero' })
+    return
+  }
+
+  try {
+    const entregaExistente = await db.entrega.findUnique({ where: { id } })
+    if (!entregaExistente) {
+      res.status(404).json({ error: 'Entrega não encontrada' })
+      return
+    }
+
+    const pagoEm = statusPagamento === StatusPagamentoEntrega.pago ? new Date() : null
+
+    const entregaAtualizada = await db.entrega.update({
+      where: { id },
+      data: {
+        statusPagamento,
+        pagoEm,
+        ...(valorMotoboy !== undefined &&
+          valorMotoboy !== null && { valorMotoboy: Number(valorMotoboy) }),
+      },
+      include: {
+        entregador: true,
+        pedido: true,
+      },
+    })
+
+    res.json(entregaAtualizada)
+  } catch (error: any) {
+    res.status(500).json({
+      error: 'Erro ao atualizar status de pagamento da entrega',
+      detalhe: error.message,
+    })
+  }
+})
+
+// 9. QUITAR EM LOTE ENTREGAS PENDENTES DE UM MOTOBOY (OPCIONALMENTE FILTRANDO POR PERÍODO)
+routes.post('/entregas/motoboy/:entregadorId/quitar', async (req, res) => {
+  const entregadorId = parseId(req.params.entregadorId)
+  if (entregadorId === null) {
+    res.status(400).json({ error: 'entregadorId inválido' })
+    return
+  }
+
+  const { inicio: inicioRaw, fim: fimRaw, apenasEntregues } = req.body ?? {}
+
+  let inicio: Date | null = null
+  let fim: Date | null = null
+  const temFiltroPeriodo = inicioRaw !== undefined || fimRaw !== undefined
+
+  if (temFiltroPeriodo) {
+    inicio = parseDia(inicioRaw)
+    fim = parseDia(fimRaw)
+    if (!inicio || !fim || inicio > fim) {
+      res.status(400).json({
+        error: 'Quando informados, inicio e fim devem estar no formato AAAA-MM-DD, com inicio <= fim',
+      })
+      return
+    }
+    if ((fim.getTime() - inicio.getTime()) / DIA_MS >= MAX_DIAS) {
+      res.status(400).json({ error: `O período deve ter no máximo ${MAX_DIAS} dias` })
+      return
+    }
+  }
+
+  try {
+    const entregador = await db.funcionario.findUnique({ where: { id: entregadorId } })
+    if (!entregador) {
+      res.status(404).json({ error: 'Entregador não encontrado' })
+      return
+    }
+
+    const candidatas = await db.entrega.findMany({
+      where: {
+        entregadorId,
+        statusPagamento: StatusPagamentoEntrega.pendente,
+        pedido: {
+          status:
+            apenasEntregues === true
+              ? StatusPedido.entregue
+              : { not: StatusPedido.cancelado },
+        },
+        ...(inicio &&
+          fim && {
+            dataHora: {
+              gte: new Date(inicio.getTime() - DIA_MS),
+              lt: new Date(fim.getTime() + 2 * DIA_MS),
+            },
+          }),
+      },
+      include: { pedido: true },
+      orderBy: { dataHora: 'asc' },
+    })
+
+    const diaInicio = temFiltroPeriodo ? String(inicioRaw) : null
+    const diaFim = temFiltroPeriodo ? String(fimRaw) : null
+
+    const entregasParaQuitar = candidatas.filter((entrega) => {
+      if (!diaInicio || !diaFim) return true
+      const dia = formatoDia.format(entrega.dataHora)
+      return dia >= diaInicio && dia <= diaFim
+    })
+
+    const agora = new Date()
+    const entregasIds = entregasParaQuitar.map((e) => e.id)
+    const valorTotalQuitado = arredondar(
+      entregasParaQuitar.reduce((acc, e) => acc + obterValorMotoboyEntrega(e), 0),
+    )
+
+    if (entregasIds.length > 0) {
+      await db.entrega.updateMany({
+        where: {
+          id: { in: entregasIds },
+          statusPagamento: StatusPagamentoEntrega.pendente,
+        },
+        data: {
+          statusPagamento: StatusPagamentoEntrega.pago,
+          pagoEm: agora,
+        },
+      })
+    }
+
+    res.json({
+      entregadorId: entregador.id,
+      nomeEntregador: entregador.nome,
+      inicio: diaInicio,
+      fim: diaFim,
+      quantidadeQuitada: entregasIds.length,
+      valorTotalQuitado,
+      pagoEm: entregasIds.length > 0 ? agora : null,
+      entregasIds,
+    })
+  } catch (error: any) {
+    res.status(500).json({
+      error: 'Erro ao quitar entregas pendentes do motoboy',
+      detalhe: error.message,
+    })
+  }
+})
+
+// 10. RELATÓRIO DE VENDAS DO PERÍODO
 routes.get('/relatorios/vendas', async (req, res) => {
   const inicio = parseDia(req.query.inicio)
   const fim = parseDia(req.query.fim)
