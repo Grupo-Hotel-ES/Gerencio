@@ -37,6 +37,11 @@ enum StatusEventoIntegracao {
   erro
 }
 
+enum StatusPagamentoEntrega {
+  pendente
+  pago
+}
+
 model Restaurante {
   id                  Int                    @id @default(autoincrement())
   cnpj                String                 @unique
@@ -198,14 +203,18 @@ model ItemPedido {
 }
 
 model Entrega {
-  id           Int          @id @default(autoincrement())
-  pedidoId     Int          @unique @map("pedido_id")
-  entregadorId Int?         @map("entregador_id")
-  distanciaKm  Float?       @map("distancia_km")
-  custoEntrega Decimal      @map("custo_entrega") @db.Decimal(10, 2)
-  dataHora     DateTime     @default(now()) @map("data_hora")
-  pedido       Pedido       @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
-  entregador   Funcionario? @relation(fields: [entregadorId], references: [id])
+  id              Int                    @id @default(autoincrement())
+  pedidoId        Int                    @unique @map("pedido_id")
+  entregadorId    Int?                   @map("entregador_id")
+  distanciaKm     Float?                 @map("distancia_km")
+  custoEntrega    Decimal                @map("custo_entrega") @db.Decimal(10, 2)
+  statusPagamento StatusPagamentoEntrega @default(pendente) @map("status_pagamento")
+  pagoEm          DateTime?              @map("pago_em")
+  dataHora        DateTime               @default(now()) @map("data_hora")
+  pedido          Pedido                 @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  entregador      Funcionario?           @relation(fields: [entregadorId], references: [id])
+
+  @@index([entregadorId, dataHora])
 }
 
 // Estado da conversa do chatbot do WhatsApp, uma linha por telefone.
