@@ -14,6 +14,8 @@ const incluirPedido = {
   itens: { include: { produto: true } },
   entrega: { include: { entregador: true } },
   restaurante: true,
+  // Links de pagamento online (api-pagamentos), do mais recente para o mais antigo
+  pagamentos: { select: { status: true, expiraEm: true }, orderBy: { criadoEm: 'desc' } },
 } as const
 
 // 1. LISTAR PEDIDOS (opcionalmente filtrando por status e cliente: ?status=novo,em_preparo&clienteId=1)
