@@ -4,6 +4,7 @@ import {
   parseId,
   StatusPedido,
   StatusPagamentoEntrega,
+  TipoFuncionario,
   ErroOperacao,
   prepararItensPedido,
   mudarStatusPedido,
@@ -470,8 +471,9 @@ routes.delete('/pedidos/:id', async (req, res) => {
   }
 })
 
-// 8. RELATÓRIO DE VENDAS DO PERÍODO
-// GET /relatorios/vendas?inicio=AAAA-MM-DD&fim=AAAA-MM-DD (datas no fuso do restaurante, inclusivas)
+// ============================================
+// CONTROLE DE GANHOS DO MOTOBOY E RELATÓRIOS
+// ============================================
 
 // Pedidos que já saíram da cozinha contam como concluídos; cancelados e em andamento ficam de fora.
 const STATUS_CONCLUIDOS = [StatusPedido.saiu_para_entrega, StatusPedido.entregue]
@@ -670,7 +672,376 @@ routes.post('/entregas/motoboy/:entregadorId/quitar', async (req, res) => {
   }
 })
 
-// 10. RELATÓRIO DE VENDAS DO PERÍODO
+// 10. CONSULTAR RESUMO E EXTRATO DE GANHOS DE UM MOTOBOY POR PERÍODO
+// GET /entregas/motoboy/:entregadorId/ganhos?inicio=AAAA-MM-DD&fim=AAAA-MM-DD&statusPagamento=pendente|pago&restauranteId=1
+routes.get('/entregas/motoboy/:entregadorId/ganhos', async (req, res) => {
+  const entregadorId = parseId(req.params.entregadorId)
+  if (entregadorId === null) {
+    res.status(400).json({ error: 'entregadorId inválido' })
+    return
+  }
+
+  const inicioRaw = req.query.inicio
+  const fimRaw = req.query.fim
+  const temFiltroPeriodo = inicioRaw !== undefined || fimRaw !== undefined
+
+  let inicio: Date | null = null
+  let fim: Date | null = null
+
+  if (temFiltroPeriodo) {
+    inicio = parseDia(inicioRaw)
+    fim = parseDia(fimRaw)
+    if (!inicio || !fim || inicio > fim) {
+      res.status(400).json({
+        error: 'Quando informados, inicio e fim devem estar no formato AAAA-MM-DD, com inicio <= fim',
+      })
+      return
+    }
+    if ((fim.getTime() - inicio.getTime()) / DIA_MS >= MAX_DIAS) {
+      res.status(400).json({ error: `O período deve ter no máximo ${MAX_DIAS} dias` })
+      return
+    }
+  }
+
+  const statusPagamentoFiltro = req.query.statusPagamento
+  if (
+    statusPagamentoFiltro !== undefined &&
+    !Object.values(StatusPagamentoEntrega).includes(statusPagamentoFiltro as StatusPagamentoEntrega)
+  ) {
+    res.status(400).json({
+      error: `statusPagamento deve ser um de: ${Object.values(StatusPagamentoEntrega).join(', ')}`,
+    })
+    return
+  }
+
+  const restauranteId =
+    req.query.restauranteId === undefined ? undefined : parseId(String(req.query.restauranteId))
+  if (restauranteId === null) {
+    res.status(400).json({ error: 'restauranteId inválido' })
+    return
+  }
+
+  const apenasEntregues = req.query.apenasEntregues === 'true'
+
+  try {
+    const entregador = await db.funcionario.findUnique({ where: { id: entregadorId } })
+    if (!entregador) {
+      res.status(404).json({ error: 'Entregador não encontrado' })
+      return
+    }
+
+    const candidatas = await db.entrega.findMany({
+      where: {
+        entregadorId,
+        pedido: {
+          ...(restauranteId && { restauranteId }),
+          status: apenasEntregues
+            ? StatusPedido.entregue
+            : { not: StatusPedido.cancelado },
+        },
+        ...(inicio &&
+          fim && {
+            dataHora: {
+              gte: new Date(inicio.getTime() - DIA_MS),
+              lt: new Date(fim.getTime() + 2 * DIA_MS),
+            },
+          }),
+      },
+      include: {
+        pedido: true,
+      },
+      orderBy: { dataHora: 'desc' },
+    })
+
+    const diaInicio = temFiltroPeriodo ? String(inicioRaw) : null
+    const diaFim = temFiltroPeriodo ? String(fimRaw) : null
+
+    const entregasNoPeriodo = candidatas.filter((entrega) => {
+      if (!diaInicio || !diaFim) return true
+      const dia = formatoDia.format(entrega.dataHora)
+      return dia >= diaInicio && dia <= diaFim
+    })
+
+    const mapaGanhosPorDia = new Map<
+      string,
+      { entregas: number; valorPendente: number; valorPago: number; valorTotal: number }
+    >()
+
+    if (inicio && fim) {
+      for (let d = inicio.getTime(); d <= fim.getTime(); d += DIA_MS) {
+        const chaveDia = new Date(d).toISOString().slice(0, 10)
+        mapaGanhosPorDia.set(chaveDia, {
+          entregas: 0,
+          valorPendente: 0,
+          valorPago: 0,
+          valorTotal: 0,
+        })
+      }
+    }
+
+    let entregasPendentes = 0
+    let entregasPagas = 0
+    let valorPendenteAReceber = 0
+    let valorJaPago = 0
+    let taxaTotalCobrada = 0
+    let distanciaTotalKm = 0
+
+    for (const entrega of entregasNoPeriodo) {
+      const dia = formatoDia.format(entrega.dataHora)
+      const valorMotoboy = obterValorMotoboyEntrega(entrega)
+      const custoEntrega = Number(entrega.custoEntrega)
+      const distancia = entrega.distanciaKm ?? 0
+
+      taxaTotalCobrada += custoEntrega
+      distanciaTotalKm += distancia
+
+      const acumuladoDia = mapaGanhosPorDia.get(dia) ?? {
+        entregas: 0,
+        valorPendente: 0,
+        valorPago: 0,
+        valorTotal: 0,
+      }
+      acumuladoDia.entregas += 1
+      acumuladoDia.valorTotal += valorMotoboy
+
+      if (entrega.statusPagamento === StatusPagamentoEntrega.pago) {
+        entregasPagas += 1
+        valorJaPago += valorMotoboy
+        acumuladoDia.valorPago += valorMotoboy
+      } else {
+        entregasPendentes += 1
+        valorPendenteAReceber += valorMotoboy
+        acumuladoDia.valorPendente += valorMotoboy
+      }
+
+      mapaGanhosPorDia.set(dia, acumuladoDia)
+    }
+
+    const totalEntregas = entregasNoPeriodo.length
+    const valorTotalPeriodo = valorPendenteAReceber + valorJaPago
+
+    const entregasFiltradasLista = statusPagamentoFiltro
+      ? entregasNoPeriodo.filter((e) => e.statusPagamento === statusPagamentoFiltro)
+      : entregasNoPeriodo
+
+    const ganhosPorDia = [...mapaGanhosPorDia.entries()]
+      .sort(([diaA], [diaB]) => diaA.localeCompare(diaB))
+      .map(([data, item]) => ({
+        data,
+        entregas: item.entregas,
+        valorPendente: arredondar(item.valorPendente),
+        valorPago: arredondar(item.valorPago),
+        valorTotal: arredondar(item.valorTotal),
+      }))
+
+    res.json({
+      entregador: {
+        id: entregador.id,
+        nome: entregador.nome,
+        cpf: entregador.cpf,
+        telefone: entregador.telefone,
+        email: entregador.email,
+        status: entregador.status,
+      },
+      periodo: {
+        inicio: diaInicio,
+        fim: diaFim,
+      },
+      resumo: {
+        totalEntregas,
+        entregasPendentes,
+        entregasPagas,
+        valorPendenteAReceber: arredondar(valorPendenteAReceber),
+        valorJaPago: arredondar(valorJaPago),
+        valorTotalPeriodo: arredondar(valorTotalPeriodo),
+        taxaTotalCobrada: arredondar(taxaTotalCobrada),
+        distanciaTotalKm: arredondar(distanciaTotalKm),
+        mediaPorEntrega: totalEntregas > 0 ? arredondar(valorTotalPeriodo / totalEntregas) : 0,
+      },
+      ganhosPorDia,
+      entregas: entregasFiltradasLista.map((entrega) => ({
+        id: entrega.id,
+        pedidoId: entrega.pedidoId,
+        entregadorId: entrega.entregadorId,
+        dataHora: entrega.dataHora,
+        dia: formatoDia.format(entrega.dataHora),
+        distanciaKm: entrega.distanciaKm,
+        custoEntrega: arredondar(Number(entrega.custoEntrega)),
+        valorMotoboy: arredondar(obterValorMotoboyEntrega(entrega)),
+        statusPagamento: entrega.statusPagamento,
+        pagoEm: entrega.pagoEm,
+        pedido: {
+          id: entrega.pedido.id,
+          nomeCliente: entrega.pedido.nomeCliente,
+          app: entrega.pedido.app,
+          enderecoDestino: entrega.pedido.enderecoDestino,
+          cepDestino: entrega.pedido.cepDestino,
+          status: entrega.pedido.status,
+          preco: arredondar(Number(entrega.pedido.preco)),
+          restauranteId: entrega.pedido.restauranteId,
+        },
+      })),
+    })
+  } catch (error: any) {
+    res.status(500).json({
+      error: 'Erro ao consultar ganhos do motoboy',
+      detalhe: error.message,
+    })
+  }
+})
+
+// 11. RESUMO GERAL DE GANHOS DE TODOS OS MOTOBOYS (POR PERÍODO OPCIONAL)
+// GET /entregas/motoboys/resumo?inicio=AAAA-MM-DD&fim=AAAA-MM-DD&restauranteId=1
+routes.get('/entregas/motoboys/resumo', async (req, res) => {
+  const inicioRaw = req.query.inicio
+  const fimRaw = req.query.fim
+  const temFiltroPeriodo = inicioRaw !== undefined || fimRaw !== undefined
+
+  let inicio: Date | null = null
+  let fim: Date | null = null
+
+  if (temFiltroPeriodo) {
+    inicio = parseDia(inicioRaw)
+    fim = parseDia(fimRaw)
+    if (!inicio || !fim || inicio > fim) {
+      res.status(400).json({
+        error: 'Quando informados, inicio e fim devem estar no formato AAAA-MM-DD, com inicio <= fim',
+      })
+      return
+    }
+    if ((fim.getTime() - inicio.getTime()) / DIA_MS >= MAX_DIAS) {
+      res.status(400).json({ error: `O período deve ter no máximo ${MAX_DIAS} dias` })
+      return
+    }
+  }
+
+  const restauranteId =
+    req.query.restauranteId === undefined ? undefined : parseId(String(req.query.restauranteId))
+  if (restauranteId === null) {
+    res.status(400).json({ error: 'restauranteId inválido' })
+    return
+  }
+
+  try {
+    const motoboys = await db.funcionario.findMany({
+      where: { tipo: TipoFuncionario.ENTREGADOR },
+      orderBy: { id: 'asc' },
+    })
+
+    const entregas = await db.entrega.findMany({
+      where: {
+        entregadorId: { not: null },
+        pedido: {
+          ...(restauranteId && { restauranteId }),
+          status: { not: StatusPedido.cancelado },
+        },
+        ...(inicio &&
+          fim && {
+            dataHora: {
+              gte: new Date(inicio.getTime() - DIA_MS),
+              lt: new Date(fim.getTime() + 2 * DIA_MS),
+            },
+          }),
+      },
+      include: { pedido: true },
+    })
+
+    const diaInicio = temFiltroPeriodo ? String(inicioRaw) : null
+    const diaFim = temFiltroPeriodo ? String(fimRaw) : null
+
+    const entregasNoPeriodo = entregas.filter((entrega) => {
+      if (!diaInicio || !diaFim) return true
+      const dia = formatoDia.format(entrega.dataHora)
+      return dia >= diaInicio && dia <= diaFim
+    })
+
+    const mapaPorMotoboy = new Map<
+      number,
+      {
+        totalEntregas: number
+        entregasPendentes: number
+        entregasPagas: number
+        valorPendenteAReceber: number
+        valorJaPago: number
+        distanciaTotalKm: number
+      }
+    >()
+
+    for (const entrega of entregasNoPeriodo) {
+      if (!entrega.entregadorId) continue
+      const atual = mapaPorMotoboy.get(entrega.entregadorId) ?? {
+        totalEntregas: 0,
+        entregasPendentes: 0,
+        entregasPagas: 0,
+        valorPendenteAReceber: 0,
+        valorJaPago: 0,
+        distanciaTotalKm: 0,
+      }
+
+      const valorMotoboy = obterValorMotoboyEntrega(entrega)
+      atual.totalEntregas += 1
+      atual.distanciaTotalKm += entrega.distanciaKm ?? 0
+
+      if (entrega.statusPagamento === StatusPagamentoEntrega.pago) {
+        atual.entregasPagas += 1
+        atual.valorJaPago += valorMotoboy
+      } else {
+        atual.entregasPendentes += 1
+        atual.valorPendenteAReceber += valorMotoboy
+      }
+
+      mapaPorMotoboy.set(entrega.entregadorId, atual)
+    }
+
+    const listaMotoboys = motoboys.map((m) => {
+      const dados = mapaPorMotoboy.get(m.id) ?? {
+        totalEntregas: 0,
+        entregasPendentes: 0,
+        entregasPagas: 0,
+        valorPendenteAReceber: 0,
+        valorJaPago: 0,
+        distanciaTotalKm: 0,
+      }
+      const valorTotalPeriodo = dados.valorPendenteAReceber + dados.valorJaPago
+      return {
+        entregadorId: m.id,
+        nome: m.nome,
+        telefone: m.telefone,
+        email: m.email,
+        status: m.status,
+        totalEntregas: dados.totalEntregas,
+        entregasPendentes: dados.entregasPendentes,
+        entregasPagas: dados.entregasPagas,
+        valorPendenteAReceber: arredondar(dados.valorPendenteAReceber),
+        valorJaPago: arredondar(dados.valorJaPago),
+        valorTotalPeriodo: arredondar(valorTotalPeriodo),
+        distanciaTotalKm: arredondar(dados.distanciaTotalKm),
+      }
+    })
+
+    const totalGeralPendente = arredondar(
+      listaMotoboys.reduce((acc, m) => acc + m.valorPendenteAReceber, 0),
+    )
+    const totalGeralPago = arredondar(
+      listaMotoboys.reduce((acc, m) => acc + m.valorJaPago, 0),
+    )
+
+    res.json({
+      periodo: { inicio: diaInicio, fim: diaFim },
+      totalGeralPendente,
+      totalGeralPago,
+      totalGeralPeriodo: arredondar(totalGeralPendente + totalGeralPago),
+      motoboys: listaMotoboys,
+    })
+  } catch (error: any) {
+    res.status(500).json({
+      error: 'Erro ao consultar resumo geral de ganhos dos motoboys',
+      detalhe: error.message,
+    })
+  }
+})
+
+// 12. RELATÓRIO DE VENDAS DO PERÍODO
 routes.get('/relatorios/vendas', async (req, res) => {
   const inicio = parseDia(req.query.inicio)
   const fim = parseDia(req.query.fim)
