@@ -43,24 +43,25 @@ enum StatusPagamentoEntrega {
 }
 
 model Restaurante {
-  id                  Int                    @id @default(autoincrement())
-  cnpj                String                 @unique
-  nome                String
-  email               String
-  telefone            String
-  cep                 String
-  cidade              String
-  endereco            String
-  latitude            Float?
-  longitude           Float?
-  taxaEntregaBase     Decimal                @default(6.00) @map("taxa_entrega_base") @db.Decimal(10, 2)
-  kmInclusosTaxaBase  Float                  @default(1.0) @map("km_inclusos_taxa_base")
-  custoPorKmAdicional Decimal                @default(1.15) @map("custo_por_km_adicional") @db.Decimal(10, 2)
-  distanciaMaximaKm   Float?                 @map("distancia_maxima_km")
-  credenciais         CredencialPlataforma[]
-  vinculos            VinculoFuncionario[]
-  produtos            Produto[]
-  pedidos             Pedido[]
+  id                       Int                    @id @default(autoincrement())
+  cnpj                     String                 @unique
+  nome                     String
+  email                    String
+  telefone                 String
+  cep                      String
+  cidade                   String
+  endereco                 String
+  latitude                 Float?
+  longitude                Float?
+  taxaEntregaBase          Decimal                @default(6.00) @map("taxa_entrega_base") @db.Decimal(10, 2)
+  kmInclusosTaxaBase       Float                  @default(1.0) @map("km_inclusos_taxa_base")
+  custoPorKmAdicional      Decimal                @default(1.15) @map("custo_por_km_adicional") @db.Decimal(10, 2)
+  distanciaMaximaKm        Float?                 @map("distancia_maxima_km")
+  percentualRepasseMotoboy Float                  @default(100.0) @map("percentual_repasse_motoboy")
+  credenciais              CredencialPlataforma[]
+  vinculos                 VinculoFuncionario[]
+  produtos                 Produto[]
+  pedidos                  Pedido[]
 }
 
 model CredencialPlataforma {
@@ -208,6 +209,7 @@ model Entrega {
   entregadorId    Int?                   @map("entregador_id")
   distanciaKm     Float?                 @map("distancia_km")
   custoEntrega    Decimal                @map("custo_entrega") @db.Decimal(10, 2)
+  valorMotoboy    Decimal?               @map("valor_motoboy") @db.Decimal(10, 2)
   statusPagamento StatusPagamentoEntrega @default(pendente) @map("status_pagamento")
   pagoEm          DateTime?              @map("pago_em")
   dataHora        DateTime               @default(now()) @map("data_hora")
