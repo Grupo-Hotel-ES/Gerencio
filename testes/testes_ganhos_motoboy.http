@@ -1,0 +1,83 @@
+@apiRestaurantes = http://localhost:3003/api
+@apiProdutos = http://localhost:3004
+@apiFuncionarios = http://localhost:3005
+@apiPedidos = http://localhost:3002/api
+
+### ============================================================================
+### ROTEIRO DE TESTES — CONTROLE DE GANHOS DO MOTOBOY (RESUMO, EXTRATO E PAGAMENTO)
+### ============================================================================
+
+### 1. Configurar Percentual de Repasse ao Motoboy no Restaurante (padrão 100%)
+PATCH {{apiRestaurantes}}/restaurantes/1/regras-entrega
+Content-Type: application/json
+
+{
+  "percentualRepasseMotoboy": 100
+}
+
+###
+
+### 2. Cadastrar Motoboy (Funcionário ENTREGADOR)
+POST {{apiFuncionarios}}/funcionarios
+Content-Type: application/json
+
+{
+  "nome": "Carlos Motoboy SJC",
+  "cpf": "123.456.789-00",
+  "telefone": "12991112222",
+  "email": "carlos.motoboy@geroncio.com.br",
+  "tipo": "ENTREGADOR",
+  "status": "disponivel"
+}
+
+###
+
+### 3. Vincular Motoboy a um Pedido Existente (calcula valorMotoboy automaticamente)
+PATCH {{apiPedidos}}/pedidos/1/entregador
+Content-Type: application/json
+
+{
+  "entregadorId": 1
+}
+
+###
+
+### 4. Consultar Resumo e Extrato Completo de Ganhos do Motoboy
+GET {{apiPedidos}}/entregas/motoboy/1/ganhos
+
+###
+
+### 5. Consultar Ganhos do Motoboy Filtrando por Período (inicio e fim)
+GET {{apiPedidos}}/entregas/motoboy/1/ganhos?inicio=2026-11-01&fim=2026-11-30
+
+###
+
+### 6. Consultar Apenas Entregas Pendentes de Pagamento do Motoboy
+GET {{apiPedidos}}/entregas/motoboy/1/ganhos?statusPagamento=pendente
+
+###
+
+### 7. Marcar uma Entrega Individual como Paga (ou Pendente)
+PATCH {{apiPedidos}}/entregas/1/pagamento
+Content-Type: application/json
+
+{
+  "statusPagamento": "pago"
+}
+
+###
+
+### 8. Quitar em Lote Todas as Entregas Pendentes do Motoboy no Período
+POST {{apiPedidos}}/entregas/motoboy/1/quitar
+Content-Type: application/json
+
+{
+  "inicio": "2026-11-01",
+  "fim": "2026-11-30"
+}
+
+###
+
+### 9. Consultar Visão Geral de Ganhos de Todos os Motoboys
+GET {{apiPedidos}}/entregas/motoboys/resumo?inicio=2026-11-01&fim=2026-11-30
+
