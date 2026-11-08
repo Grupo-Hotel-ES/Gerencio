@@ -23,11 +23,13 @@ export interface RegrasEntregaRestaurante {
   kmInclusosTaxaBase: number
   custoPorKmAdicional: number
   distanciaMaximaKm?: number | null
+  percentualRepasseMotoboy?: number
 }
 
 export interface ResultadoCalculoTaxa {
   dentroDaAreaEntrega: boolean
   taxaEntrega: number | null
+  valorMotoboy: number | null
   kmExcedente: number
   motivoRecusa?: string
 }
@@ -51,6 +53,7 @@ export interface ResultadoCotacaoFrete {
   metodoCalculo: 'rota_viaria' | 'contingencia_haversine'
   dentroDaAreaEntrega: boolean
   taxaEntrega: number | null
+  valorMotoboy: number | null
   kmExcedente: number
   motivoRecusa?: string
   regrasAplicadas: {
@@ -58,6 +61,7 @@ export interface ResultadoCotacaoFrete {
     kmInclusosTaxaBase: number
     custoPorKmAdicional: number
     distanciaMaximaKm: number | null
+    percentualRepasseMotoboy: number
   }
 }
 
@@ -73,6 +77,18 @@ const VIACEP_API_URL = process.env.VIACEP_API_URL ?? 'https://viacep.com.br/ws'
 
 export function arredondar2Casas(valor: number): number {
   return Math.round(valor * 100) / 100
+}
+
+/**
+ * Calcula o valor líquido a ser repassado ao motoboy com base na taxa de entrega
+ * e no percentual configurado pelo restaurante (por padrão, 100% da taxa vai para o motoboy).
+ */
+export function calcularValorMotoboy(
+  custoEntrega: number,
+  percentualRepasseMotoboy = 100,
+): number {
+  const percentual = Math.min(100, Math.max(0, percentualRepasseMotoboy))
+  return arredondar2Casas(custoEntrega * (percentual / 100))
 }
 
 /**
@@ -314,16 +330,21 @@ export function calcularTaxaEntregaRestaurante(
     return {
       dentroDaAreaEntrega: false,
       taxaEntrega: null,
+      valorMotoboy: null,
       kmExcedente,
       motivoRecusa: `A distância da rota (${distanciaKm} km) ultrapassa o limite máximo de entrega do restaurante (${regras.distanciaMaximaKm} km)`,
     }
   }
 
   const valorBruto = regras.taxaEntregaBase + regras.custoPorKmAdicional * kmExcedente
+  const taxaEntrega = arredondar2Casas(valorBruto)
+  const percentualRepasse = regras.percentualRepasseMotoboy ?? 100
+  const valorMotoboy = calcularValorMotoboy(taxaEntrega, percentualRepasse)
 
   return {
     dentroDaAreaEntrega: true,
-    taxaEntrega: arredondar2Casas(valorBruto),
+    taxaEntrega,
+    valorMotoboy,
     kmExcedente,
   }
 }
@@ -466,6 +487,7 @@ export async function cotarFreteRestaurante(
     kmInclusosTaxaBase: restaurante.kmInclusosTaxaBase,
     custoPorKmAdicional: Number(restaurante.custoPorKmAdicional),
     distanciaMaximaKm: restaurante.distanciaMaximaKm,
+    percentualRepasseMotoboy: restaurante.percentualRepasseMotoboy,
   }
 
   const calculoTaxa = calcularTaxaEntregaRestaurante(rota.distanciaKm, regras)
@@ -490,9 +512,9 @@ export async function cotarFreteRestaurante(
     metodoCalculo: rota.metodoCalculo,
     dentroDaAreaEntrega: calculoTaxa.dentroDaAreaEntrega,
     taxaEntrega: calculoTaxa.taxaEntrega,
+    valorMotoboy: calculoTaxa.valorMotoboy,
     kmExcedente: calculoTaxa.kmExcedente,
     ...(calculoTaxa.motivoRecusa && { motivoRecusa: calculoTaxa.motivoRecusa }),
     regrasAplicadas: regras,
   }
 }
-

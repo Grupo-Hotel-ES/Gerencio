@@ -56,6 +56,60 @@ function dadosRestaurante() {
   }
 }
 
+async function prepararQuitacao() {
+  const entregador = await db.funcionario.create({ data: {
+    nome: 'Motoboy de teste', cpf: randomUUID(), telefone: '0', email: 'teste@example.invalid', tipo: 'ENTREGADOR',
+  } })
+  const entregas = []
+  for (const valor of [8, null]) {
+    const cenario = await prepararPagamento()
+    entregas.push(await db.entrega.create({ data: {
+      pedidoId: cenario.pedidoId, entregadorId: entregador.id,
+      custoEntrega: 12, valorMotoboy: valor,
+    } }))
+  }
+  return { entregador, entregas }
+}
+
+describe('Quitação do motoboy', () => {
+  it('quando existem entregas pendentes, então informa somente as entregas efetivamente quitadas e seu valor', async () => {
+    const { entregador, entregas } = await prepararQuitacao()
+    const resposta = await requisitar(apiPedidos, `/api/entregas/motoboy/${entregador.id}/quitar`, 'POST', {})
+    assert.equal(resposta.status, 200)
+    assert.equal(resposta.dados.quantidadeQuitada, 2)
+    assert.equal(resposta.dados.valorTotalQuitado, 20)
+    assert.deepEqual(resposta.dados.entregasIds, entregas.map(e => e.id))
+    const gravadas = await db.entrega.findMany({ where: { entregadorId: entregador.id } })
+    assert.ok(gravadas.every(e => e.statusPagamento === 'pago' && e.pagoEm))
+  })
+
+  it('quando duas quitações chegam simultaneamente, então cada entrega é contabilizada como quitada em apenas uma resposta', async () => {
+    const { entregador, entregas } = await prepararQuitacao()
+    const quitar = () => requisitar(apiPedidos, `/api/entregas/motoboy/${entregador.id}/quitar`, 'POST', {})
+    const respostas = await Promise.all([quitar(), quitar()])
+    assert.deepEqual(respostas.map(r => r.status), [200, 200])
+    assert.equal(respostas.reduce((s, r) => s + r.dados.quantidadeQuitada, 0), 2)
+    assert.equal(respostas.reduce((s, r) => s + r.dados.valorTotalQuitado, 0), 20)
+    const ids = respostas.flatMap(r => r.dados.entregasIds).sort((a, b) => a - b)
+    assert.deepEqual(ids, entregas.map(e => e.id))
+    assert.equal(await db.entrega.count({ where: { entregadorId: entregador.id, statusPagamento: 'pago' } }), 2)
+  })
+
+  it('quando o lote é repetido, então retorna zero novas quitações', async () => {
+    const { entregador } = await prepararQuitacao()
+    const caminho = `/api/entregas/motoboy/${entregador.id}/quitar`
+    assert.equal((await requisitar(apiPedidos, caminho, 'POST', {})).status, 200)
+    const antes = await db.entrega.findMany({ where: { entregadorId: entregador.id }, orderBy: { id: 'asc' } })
+    const repetida = await requisitar(apiPedidos, caminho, 'POST', {})
+    assert.equal(repetida.status, 200)
+    assert.equal(repetida.dados.quantidadeQuitada, 0)
+    assert.equal(repetida.dados.valorTotalQuitado, 0)
+    assert.equal(repetida.dados.pagoEm, null)
+    assert.deepEqual(repetida.dados.entregasIds, [])
+    assert.deepEqual(await db.entrega.findMany({ where: { entregadorId: entregador.id }, orderBy: { id: 'asc' } }), antes)
+  })
+})
+
 async function prepararPagamento(quantidade = 5) {
   const restaurante = await requisitar(apiRestaurantes, '/api/restaurantes', 'POST', dadosRestaurante())
   assert.equal(restaurante.status, 201, JSON.stringify(restaurante.dados))

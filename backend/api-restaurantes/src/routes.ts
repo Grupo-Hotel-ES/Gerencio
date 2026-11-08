@@ -11,6 +11,7 @@ function extrairCamposEntrega(body: Record<string, any>) {
     kmInclusosTaxaBase,
     custoPorKmAdicional,
     distanciaMaximaKm,
+    percentualRepasseMotoboy,
   } = body
 
   if (taxaEntregaBase !== undefined && (isNaN(Number(taxaEntregaBase)) || Number(taxaEntregaBase) < 0)) {
@@ -29,6 +30,14 @@ function extrairCamposEntrega(body: Record<string, any>) {
   ) {
     return { erro: 'distanciaMaximaKm deve ser um número maior que zero ou null' }
   }
+  if (
+    percentualRepasseMotoboy !== undefined &&
+    (isNaN(Number(percentualRepasseMotoboy)) ||
+      Number(percentualRepasseMotoboy) < 0 ||
+      Number(percentualRepasseMotoboy) > 100)
+  ) {
+    return { erro: 'percentualRepasseMotoboy deve ser um número entre 0 e 100' }
+  }
   if (latitude !== undefined && latitude !== null && isNaN(Number(latitude))) {
     return { erro: 'latitude inválida' }
   }
@@ -45,6 +54,9 @@ function extrairCamposEntrega(body: Record<string, any>) {
       ...(custoPorKmAdicional !== undefined && { custoPorKmAdicional: Number(custoPorKmAdicional) }),
       ...(distanciaMaximaKm !== undefined && {
         distanciaMaximaKm: distanciaMaximaKm === null ? null : Number(distanciaMaximaKm),
+      }),
+      ...(percentualRepasseMotoboy !== undefined && {
+        percentualRepasseMotoboy: Number(percentualRepasseMotoboy),
       }),
     },
   }
@@ -235,6 +247,7 @@ routes.get('/restaurantes/:id/regras-entrega', async (req, res) => {
       kmInclusosTaxaBase: restaurante.kmInclusosTaxaBase,
       custoPorKmAdicional: Number(restaurante.custoPorKmAdicional),
       distanciaMaximaKm: restaurante.distanciaMaximaKm,
+      percentualRepasseMotoboy: restaurante.percentualRepasseMotoboy,
     })
   } catch (error: any) {
     res.status(500).json({ error: 'Erro ao consultar regras de entrega', detalhe: error.message })
@@ -258,7 +271,7 @@ routes.patch('/restaurantes/:id/regras-entrega', async (req, res) => {
   if (!validacaoEntrega.dados || Object.keys(validacaoEntrega.dados).length === 0) {
     res.status(400).json({
       error:
-        'Informe ao menos um campo para atualizar (taxaEntregaBase, kmInclusosTaxaBase, custoPorKmAdicional, distanciaMaximaKm, latitude, longitude)',
+        'Informe ao menos um campo para atualizar (taxaEntregaBase, kmInclusosTaxaBase, custoPorKmAdicional, distanciaMaximaKm, percentualRepasseMotoboy, latitude, longitude)',
     })
     return
   }
@@ -287,6 +300,7 @@ routes.patch('/restaurantes/:id/regras-entrega', async (req, res) => {
       kmInclusosTaxaBase: atualizado.kmInclusosTaxaBase,
       custoPorKmAdicional: Number(atualizado.custoPorKmAdicional),
       distanciaMaximaKm: atualizado.distanciaMaximaKm,
+      percentualRepasseMotoboy: atualizado.percentualRepasseMotoboy,
     })
   } catch (error: any) {
     res.status(500).json({ error: 'Erro ao atualizar regras de entrega', detalhe: error.message })
