@@ -6,7 +6,7 @@ Comportamentos desta primeira etapa confirmados pelo responsável pelo projeto n
 
 | Fluxo | Risco | Cobertura nesta etapa |
 | --- | --- | --- |
-| Cadastro de restaurante | Dados inválidos ou não persistidos | Cadastro e consulta HTTP; ausência de nome sem gravação |
+| Cadastro de restaurante | Dados inválidos ou não persistidos | Cadastro e consulta HTTP; ausência de nome sem gravação; listagem completa; atualização PUT e PATCH com validação; exclusão com cascade de credenciais; consulta de cardápio isolado |
 | Produtos e pedidos manuais | Preço adulterado, itens inconsistentes, mistura de restaurantes | Suíte existente de pedidos/estoque preservada |
 | Aceite, cancelamento e estoque | Baixa duplicada, saldo negativo, devolução duplicada, gravação parcial | Suíte existente: concorrência de aceites e disputa de saldo, ciclo e ajustes |
 | Entrada de webhooks de delivery | Duplicação e falsificação de eventos | Dois POSTs iFood simultâneos; rejeição de assinatura Rappi inválida |
@@ -22,12 +22,17 @@ Comportamentos desta primeira etapa confirmados pelo responsável pelo projeto n
 
 Esta entrega é uma base simples de regressão, não cobertura integral dos fluxos críticos. As decisões de permissões, escopo dos códigos de plataforma, relatórios e exclusão de clientes continuam dependendo da confirmação do responsável.
 
-## Dez cenários novos aprovados
+## Quinze cenários aprovados
 
 ```text
 describe "Cadastro de restaurante"
   it "quando os dados obrigatórios são válidos, então cadastra e permite consultar o restaurante"
   it "quando falta o nome, então responde 400 sem gravar"
+  it "quando lista restaurantes, então retorna os estabelecimentos persistidos"
+  it "quando atualiza todos os dados do restaurante via PUT, então substitui os dados antigos e valida erros"
+  it "quando atualiza parcialmente via PATCH, então altera apenas os campos informados sem resetar os demais"
+  it "quando deleta o restaurante, então remove o registro e suas credenciais em cascata"
+  it "quando consulta os produtos do restaurante, então retorna apenas o cardápio daquele estabelecimento"
 
 describe "Webhook de delivery"
   it "quando dois webhooks iFood iguais chegam simultaneamente, então persiste um único evento"
@@ -48,11 +53,11 @@ Os onze cenários em `backend/testes/pedidos-estoque.test.ts` foram mantidos, co
 
 ## Resultado da execução local
 
-- Data: 02/11/2026.
+- Data: 08/11/2026.
 - Comando: `pnpm test:integracao` na raiz.
 - Ambiente: Node.js 24, PostgreSQL 16 em container temporário e 11 migrations existentes aplicadas no banco de teste vazio.
-- Cenários de comportamento: **20 passaram e 1 falhou**, de 21.
-- O resumo do Node informa **22 testes, 21 aprovados, 1 reprovado**, porque também conta o teste agregador dos onze cenários legados.
+- Cenários de comportamento: **25 passaram e 1 falhou**, de 26 (mais o teste agregador dos 11 cenários legados).
+- O resumo do Node informa **27 testes, 26 aprovados, 1 reprovado**, porque também conta o teste agregador dos onze cenários legados.
 - Ignorados, pendentes e cancelados: **zero**.
 - `pnpm typecheck` no backend: passou.
 - `pnpm exec tsc --noEmit -p testes/tsconfig.json`: passou.
