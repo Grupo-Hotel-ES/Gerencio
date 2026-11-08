@@ -38,6 +38,8 @@ export default function PlanejarRota() {
   const [erro, setErro] = useState<string | null>(null);
   // Restaurante cuja rota já foi preenchida com os prontos (só acontece uma vez por restaurante)
   const preenchida = useRef<number | null>(null);
+  const ultimaCarga = useRef(0);
+  const operacaoEmCurso = useRef(false);
 
   useEffect(() => {
     listarRestaurantes()
@@ -45,9 +47,11 @@ export default function PlanejarRota() {
       .catch((e: Error) => setErro(`Restaurantes: ${e.message}`));
   }, []);
 
-  const carregarPedidos = useCallback(async (id: number) => {
+  const carregarPedidos = useCallback(async (id: number, aindaAtivo: () => boolean = () => true) => {
+    const carga = ++ultimaCarga.current;
     try {
       const dados = await listarPedidosParaRota(id);
+      if (!aindaAtivo() || carga !== ultimaCarga.current) return;
       setProntos(dados);
       // Na primeira carga, a rota começa com todos os prontos (até o limite). Depois, mantém
       // a ordem escolhida e só tira da rota quem deixou de estar pronto.
@@ -59,16 +63,19 @@ export default function PlanejarRota() {
         return atuais.filter((p) => porId.has(p.id)).map((p) => porId.get(p.id)!);
       });
     } catch (e) {
+      if (!aindaAtivo() || carga !== ultimaCarga.current) return;
       setErro((e as Error).message);
+      setProntos((atuais) => atuais ?? []);
     }
   }, []);
 
   useEffect(() => {
     if (restauranteId === undefined) return;
+    let ativo = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- carregarPedidos atualiza o estado somente após a resposta HTTP.
-    carregarPedidos(restauranteId);
-    const intervalo = setInterval(() => carregarPedidos(restauranteId), INTERVALO_ATUALIZACAO_MS);
-    return () => clearInterval(intervalo);
+    carregarPedidos(restauranteId, () => ativo);
+    const intervalo = setInterval(() => carregarPedidos(restauranteId, () => ativo), INTERVALO_ATUALIZACAO_MS);
+    return () => { ativo = false; clearInterval(intervalo); };
   }, [restauranteId, carregarPedidos]);
 
   const restaurante = restaurantes.find((r) => r.id === restauranteId);
@@ -82,7 +89,8 @@ export default function PlanejarRota() {
   const ocupado = calculando || exportando;
 
   const visualizar = async () => {
-    if (restauranteId === undefined || pedidoIds.length === 0) return;
+    if (operacaoEmCurso.current || restauranteId === undefined || pedidoIds.length === 0) return;
+    operacaoEmCurso.current = true;
     setCalculando(true); setErro(null);
     try {
       const dados = await calcularRota({ restauranteId, pedidoIds, transporte });
@@ -90,12 +98,14 @@ export default function PlanejarRota() {
     } catch (e) {
       setErro((e as Error).message);
     } finally {
+      operacaoEmCurso.current = false;
       setCalculando(false);
     }
   };
 
   const exportar = async () => {
-    if (restauranteId === undefined || pedidoIds.length === 0) return;
+    if (operacaoEmCurso.current || restauranteId === undefined || pedidoIds.length === 0) return;
+    operacaoEmCurso.current = true;
     setExportando(true); setErro(null);
     try {
       const resultado = await exportarRota({ restauranteId, pedidoIds, transporte });
@@ -106,6 +116,7 @@ export default function PlanejarRota() {
     } catch (e) {
       setErro((e as Error).message);
     } finally {
+      operacaoEmCurso.current = false;
       setExportando(false);
     }
   };
@@ -115,9 +126,10 @@ export default function PlanejarRota() {
       titulo="Planejar rota"
       subtitulo="Monte a rota com os pedidos prontos, confira o percurso no mapa e envie ao entregador.">
       <SeletorRestaurante restaurantes={restaurantes} valor={restauranteId} desabilitado={ocupado} onChange={(id) => {
+        ultimaCarga.current += 1;
         setProntos(null); setParadas([]); setRota(null); setExportada(null); setErro(null); setRestauranteId(id);
       }} />
-      <RotaFormulario nome={nome} onNome={setNome} transporte={transporte} onTransporte={setTransporte} />
+      <RotaFormulario nome={nome} onNome={setNome} transporte={transporte} onTransporte={setTransporte} desabilitado={ocupado} />
 
       {erro && (
         <Cartao style={[styles.erro, { borderColor: cores.feedbackErro }]}>
@@ -146,6 +158,7 @@ export default function PlanejarRota() {
             rota={rotaAtual}
             onExportar={exportar}
             exportando={exportando}
+            calculando={calculando}
             exportada={exportada}
             onFecharExportacao={() => { setExportada(null); setRota(null); }}
           />

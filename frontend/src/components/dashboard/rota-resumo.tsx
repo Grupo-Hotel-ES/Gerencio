@@ -17,13 +17,14 @@ type Props = {
   rota: RotaCalculada | null;
   onExportar: () => void;
   exportando: boolean;
+  calculando?: boolean;
   /** Resultado da última exportação. */
   exportada: { url: string; pedidoIds: number[] } | null;
   onFecharExportacao: () => void;
 };
 
 /** Paradas, distância, duração, a sequência Saída → 1 → 2 → 3 e a exportação para o Google Maps. */
-export function RotaResumo({ partida, paradas, rota, onExportar, exportando, exportada, onFecharExportacao }: Props) {
+export function RotaResumo({ partida, paradas, rota, onExportar, exportando, calculando = false, exportada, onFecharExportacao }: Props) {
   const cores = useCores();
   const [copiado, setCopiado] = useState(false);
 
@@ -85,7 +86,7 @@ export function RotaResumo({ partida, paradas, rota, onExportar, exportando, exp
         rotulo={exportando ? 'Exportando…' : 'Exportar rota'}
         icone="setaDireita"
         variante="primario"
-        disabled={exportando || paradas.length === 0}
+        disabled={exportando || calculando || paradas.length === 0}
         onPress={onExportar}
       />
       <Texto tamanho={13} cor="textoSecundario">
