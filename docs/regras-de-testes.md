@@ -2,6 +2,18 @@
 
 Este documento define o contrato de qualidade do projeto para pessoas e agentes de IA. O objetivo é identificar regressões antes de integrar mudanças, mantendo testes confiáveis e comportamentos aprovados pelo responsável pelo produto. Uma suíte verde comprova os cenários cobertos; não garante ausência de bugs no restante do sistema.
 
+Para começar pelo vocabulário e pelos exemplos, leia [Conceitos de testes no Gerôncio](conceitos-de-testes.md).
+
+## Política de evolução acordada em 09/11/2026
+
+1. Concluir o PR #46 com a suíte existente, a correção do bug financeiro reproduzido, a verificação de tipos de todos os testes e relatórios que identifiquem a execução atual. Validar localmente com PostgreSQL isolado no Docker e exigir o CI aprovado antes da integração à develop.
+2. Integrar o PR #47 de rotas, revisando o comportamento final e executando os checks e a suíte existente. Preservar as regressões já protegidas.
+3. Depois do PR #47, inventariar todas as partes do projeto e ampliar sua cobertura em PRs pequenos por fluxo: backend, frontend, integrações externas, chatbot e mock. O [plano de cobertura](cobertura-testes.md#plano-de-ampliação-após-o-pr-47) orienta essa etapa.
+
+Para cada fluxo, confirmar primeiro os cenários em português com o responsável. Testes unitários, de integração, de interface e E2E devem ser escolhidos conforme o risco e o que precisa ser comprovado. A meta é cobrir os comportamentos relevantes de todas as partes, com lacunas explícitas; não prometer cobertura integral com base apenas na quantidade de testes ou em uma porcentagem de linhas.
+
+A expansão posterior não suspende a suíte atual nem permite ignorar falhas durante a integração dos PRs. Bugs corrigidos devem conservar sua regressão automatizada; comportamentos novos continuam seguindo a aprovação de cenários descrita abaixo.
+
 ## Executar
 
 Pré-requisitos: Node.js 24, pnpm 11.24.0, Docker Desktop com containers Linux em execução e dependências do backend instaladas:
@@ -15,6 +27,8 @@ pnpm test:integracao
 
 Depois da instalação inicial, **`pnpm test:integracao`**, na raiz, executa toda a suíte automatizada de integração do backend. `pnpm test` é um alias. Os roteiros `.http`, o exemplo de teste do Create React App no mock e um eventual E2E são verificações distintas; não estão incluídos neste comando.
 
+Se o pnpm tentar recriar o `node_modules` da raiz e parar por ausência de terminal interativo, após instalar as dependências fixadas do backend use `pnpm --config.verify-deps-before-run=false test:integracao`. Essa [opção do pnpm](https://pnpm.io/settings#verifydepsbeforerun) evita somente a checagem/reinstalação automática de dependências naquele comando. O executor, a descoberta de todos os testes e as proteções de ambiente permanecem iguais. Não é necessário alterar configurações globais.
+
 O executor:
 
 1. Descobre todos os arquivos `backend/testes/**/*.test.ts`, incluindo os antigos.
@@ -26,13 +40,15 @@ O executor:
 7. Exibe o resultado e grava `.resultados-testes/integracao.tap`, mesmo quando uma asserção falha.
 8. Descarta somente o container criado por esta execução, inclusive quando os testes falham.
 
+Antes da preparação, o executor remove o TAP anterior. O arquivo `.resultados-testes/execucao-integracao.json` registra a revisão Git, se havia alterações locais, o horário, o container, o resultado e o código de saída, inclusive em falhas de preparação. O CI guarda ambos como artefatos. A ausência de um TAP novo significa que não há relatório de cenários dessa tentativa.
+
 Código de saída `0` significa sucesso; qualquer falha de preparação, teste ou limpeza produz código diferente de zero. Teste cancelado, ignorado ou pendente também reprova a execução. Se o processo for encerrado à força pelo sistema operacional, a limpeza pode não ocorrer; o nome do container de teste aparece no início da saída para identificação, sem afetar os containers do projeto.
 
 `backend/testes/ambiente.ts` valida ambiente, destino, porta e credenciais temporárias antes de carregar os serviços. Não execute arquivos isolados contornando essa validação. A `.env` local não determina o banco de teste: o executor fornece a URL isolada aos processos filhos.
 
 ## Comportamentos antes da implementação
 
-- Antes de escrever um teste de negócio novo, apresentar ao responsável as frases `describe` / `it` em português, com a forma **“quando ..., então ...”**.
+- Antes de escrever um teste de negócio novo, apresentar ao responsável as frases `describe` / `it` em português, com a forma **"quando ..., então ..."**.
 - Esperar confirmação ou correção. O comportamento existente no código não é automaticamente o comportamento correto.
 - Registrar a aprovação e as decisões relevantes no documento de cobertura. Se houver dúvida durante a implementação, interromper o cenário afetado e perguntar.
 - Considerar, para cada fluxo, caminho feliz, erros esperados, repetição, concorrência, limites e acesso indevido. Registrar explicitamente o que ainda não possui contrato aprovado ou implementação.
@@ -76,10 +92,10 @@ O verificador de marcações do executor é uma proteção adicional e não subs
 
 - Após alterações no backend: executar `pnpm test:integracao` na raiz e `pnpm typecheck` no backend. Para os testes novos: `pnpm exec tsc --noEmit -p testes/tsconfig.json` no backend.
 - Após alterações no frontend: executar também `pnpm lint` no frontend e as verificações aplicáveis à mudança.
-- Informar comando, revisão analisada, resultado e limitações. Distinguir “passou”, “falhou” e “não executado”.
+- Informar comando, revisão analisada, resultado e limitações. Distinguir "passou", "falhou" e "não executado".
 - Nunca anunciar tudo verde quando existe teste falhando ou quando o ambiente impediu sua execução.
 - Em uma entrega de diagnóstico, é permitido registrar o commit na branch de trabalho com o teste reproduzindo o bug e o relatório explícito. Isso não autoriza integrar uma regressão à `develop`.
-- Antes de integrar uma PR, revisar mudanças nos testes e exigir a verificação **“Integração com PostgreSQL real”** aprovada.
+- Antes de integrar uma PR, revisar mudanças nos testes e exigir a verificação **"Integração com PostgreSQL real"** aprovada.
 
 O workflow `.github/workflows/testes.yml` executa os testes em PRs e em pushes de `lucas`, `develop` e `main`, além de guardar o relatório. Não utiliza `continue-on-error`. O administrador do repositório precisa tornar essa verificação obrigatória nas regras de proteção de `develop`/`main`: o arquivo do workflow, sozinho, não impede um merge manual. Essa configuração remota não foi alterada nesta entrega.
 

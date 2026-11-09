@@ -11,10 +11,11 @@ type Props = {
   onNome: (nome: string) => void;
   transporte: MeioTransporte;
   onTransporte: (meio: MeioTransporte) => void;
+  desabilitado?: boolean;
 };
 
 /** Nome da rota e meio de transporte. */
-export function RotaFormulario({ nome, onNome, transporte, onTransporte }: Props) {
+export function RotaFormulario({ nome, onNome, transporte, onTransporte, desabilitado = false }: Props) {
   const cores = useCores();
 
   return (
@@ -24,6 +25,7 @@ export function RotaFormulario({ nome, onNome, transporte, onTransporte }: Props
         <TextInput
           accessibilityLabel="Nome da rota"
           value={nome}
+          editable={!desabilitado}
           onChangeText={onNome}
           placeholder="Ex.: Rota Centro"
           placeholderTextColor={cores.textoSecundario}
@@ -37,7 +39,7 @@ export function RotaFormulario({ nome, onNome, transporte, onTransporte }: Props
         </View>
         <View style={styles.chips}>
           {MEIOS_TRANSPORTE.map(({ id, rotulo }) => (
-            <Chip key={id} rotulo={rotulo} ativo={transporte === id} onPress={() => onTransporte(id)} />
+            <Chip key={id} rotulo={rotulo} ativo={transporte === id} onPress={desabilitado ? undefined : () => onTransporte(id)} />
           ))}
         </View>
       </View>

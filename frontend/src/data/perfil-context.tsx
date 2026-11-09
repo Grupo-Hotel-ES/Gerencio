@@ -1,5 +1,16 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
+import { useSessao } from '@/data/sessao';
+import {
+  buscarRestaurante,
+  rotuloPapel,
+  salvarMeusDados,
+  salvarRestaurante,
+  type AlteracaoRestaurante,
+  type Restaurante,
+} from '@/services/api-conta';
+
+/** Dados exibidos e editados na página Perfil: o usuário da sessão e o restaurante. */
 export type DadosPerfil = {
   nomeCompleto: string;
   telefoneCelular: string;
@@ -20,65 +31,115 @@ export type DadosPerfil = {
   lojaAberta: boolean;
 };
 
-export const PERFIL_PADRAO: DadosPerfil = {
-  nomeCompleto: 'Marina Almeida',
-  telefoneCelular: '(11) 98765-4321',
-  emailAcesso: 'marina@vilabistro.com.br',
-  cargo: 'Administradora',
-  nomeRestaurante: 'Vila Bistrô',
-  razaoSocial: 'Vila Bistrô Alimentação Ltda.',
-  cnpj: '12.345.678/0001-90',
-  categoria: 'Restaurante',
-  telefoneRestaurante: '(11) 3456-7890',
-  emailContato: 'contato@vilabistro.com.br',
-  cep: '01001-000',
-  cidadeUf: 'São Paulo / SP',
-  logradouro: 'Rua das Palmeiras',
-  numero: '120',
-  complemento: 'Loja 2',
-  bairro: 'Centro',
-  lojaAberta: true,
-};
-
 /**
  * Retorna as duas primeiras letras do primeiro nome em maiúsculo.
  * Ex: Marina -> MA, Felipe -> FE, Fagundes -> FA.
  */
 export function obterIniciais(nome: string): string {
   const limpo = nome.trim();
-  if (!limpo) return 'MA';
+  if (!limpo) return '??';
   return limpo.slice(0, 2).toUpperCase();
 }
 
+/** "Caçapava / SP" <-> { cidade, uf }. */
+export function juntarCidadeUf(cidade: string, uf: string) {
+  return [cidade, uf].filter(Boolean).join(' / ');
+}
+
+export function separarCidadeUf(texto: string) {
+  const [cidade = '', uf = ''] = texto.split('/').map((parte) => parte.trim());
+  return { cidade, uf: uf.toUpperCase() };
+}
+
 type PerfilContextValor = {
-  perfil: DadosPerfil;
-  atualizarPerfil: (novosDados: Partial<DadosPerfil>) => void;
-  salvarPerfil: (novosDados: DadosPerfil) => void;
+  /** null enquanto o restaurante não carregou. */
+  perfil: DadosPerfil | null;
+  restaurante: Restaurante | null;
+  erro: string | null;
+  /** Administradores e gerentes editam os dados do restaurante. */
+  podeEditarRestaurante: boolean;
+  salvarPerfil: (novosDados: DadosPerfil) => Promise<void>;
+  atualizarRestaurante: (dados: AlteracaoRestaurante) => Promise<Restaurante>;
   iniciais: string;
 };
 
 const PerfilContext = createContext<PerfilContextValor>({
-  perfil: PERFIL_PADRAO,
-  atualizarPerfil: () => {},
-  salvarPerfil: () => {},
-  iniciais: 'MA',
+  perfil: null,
+  restaurante: null,
+  erro: null,
+  podeEditarRestaurante: false,
+  salvarPerfil: async () => {},
+  atualizarRestaurante: async () => { throw new Error('Sem sessão'); },
+  iniciais: '??',
 });
 
+/** Carrega o restaurante (único) e combina com o usuário da sessão. */
 export function PerfilProvider({ children }: { children: ReactNode }) {
-  const [perfil, setPerfil] = useState<DadosPerfil>(PERFIL_PADRAO);
+  const { usuario, atualizarUsuario } = useSessao();
+  const [restaurante, setRestaurante] = useState<Restaurante | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
 
-  const atualizarPerfil = (novosDados: Partial<DadosPerfil>) => {
-    setPerfil((anterior) => ({ ...anterior, ...novosDados }));
+  useEffect(() => {
+    if (!usuario) return;
+    let ativo = true;
+    buscarRestaurante()
+      .then((dados) => { if (ativo) { setRestaurante(dados); setErro(null); } })
+      .catch((e: Error) => { if (ativo) setErro(e.message); });
+    return () => { ativo = false; };
+  }, [usuario]);
+
+  const podeEditarRestaurante = usuario?.papel === 'administrador' || usuario?.papel === 'gerente';
+
+  const atualizarRestaurante = useCallback(async (dados: AlteracaoRestaurante) => {
+    const atualizado = await salvarRestaurante(dados);
+    setRestaurante(atualizado);
+    return atualizado;
+  }, []);
+
+  const perfil: DadosPerfil | null = usuario && restaurante ? {
+    nomeCompleto: usuario.nome,
+    telefoneCelular: usuario.telefone,
+    emailAcesso: usuario.email,
+    cargo: rotuloPapel(usuario.papel),
+    nomeRestaurante: restaurante.nome,
+    razaoSocial: restaurante.razaoSocial,
+    cnpj: restaurante.cnpj,
+    categoria: restaurante.categoria,
+    telefoneRestaurante: restaurante.telefone,
+    emailContato: restaurante.email,
+    cep: restaurante.cep,
+    cidadeUf: juntarCidadeUf(restaurante.cidade, restaurante.uf),
+    logradouro: restaurante.logradouro,
+    numero: restaurante.numero,
+    complemento: restaurante.complemento,
+    bairro: restaurante.bairro,
+    lojaAberta: restaurante.configuracoes.operacao?.lojaAberta ?? true,
+  } : null;
+
+  const salvarPerfil = async (dados: DadosPerfil) => {
+    atualizarUsuario(await salvarMeusDados({ nome: dados.nomeCompleto, email: dados.emailAcesso, telefone: dados.telefoneCelular }));
+    if (!podeEditarRestaurante) return;
+    await atualizarRestaurante({
+      nome: dados.nomeRestaurante,
+      razaoSocial: dados.razaoSocial,
+      cnpj: dados.cnpj,
+      categoria: dados.categoria,
+      telefone: dados.telefoneRestaurante,
+      email: dados.emailContato,
+      cep: dados.cep,
+      ...separarCidadeUf(dados.cidadeUf),
+      logradouro: dados.logradouro,
+      numero: dados.numero,
+      complemento: dados.complemento,
+      bairro: dados.bairro,
+    });
   };
-
-  const salvarPerfil = (novosDados: DadosPerfil) => {
-    setPerfil(novosDados);
-  };
-
-  const iniciais = obterIniciais(perfil.nomeCompleto);
 
   return (
-    <PerfilContext.Provider value={{ perfil, atualizarPerfil, salvarPerfil, iniciais }}>
+    <PerfilContext.Provider value={{
+      perfil, restaurante, erro, podeEditarRestaurante, salvarPerfil, atualizarRestaurante,
+      iniciais: obterIniciais(usuario?.nome ?? ''),
+    }}>
       {children}
     </PerfilContext.Provider>
   );
@@ -87,4 +148,3 @@ export function PerfilProvider({ children }: { children: ReactNode }) {
 export function usePerfil() {
   return useContext(PerfilContext);
 }
-

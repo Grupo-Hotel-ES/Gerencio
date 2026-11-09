@@ -24,6 +24,8 @@
 
 **Impacto:** o painel pode informar falha para um pedido já pago e aceito. A reprodução não comprova cobrança duplicada; comprova inconsistência do estado persistido.
 
-**Direção de correção:** definir transições monotônicas para pagamento e impedir que eventos atrasados de falha regridam `pago`, com condição atômica no banco. Manter este teste e acrescentar concorrência entre eventos conflitantes quando a correção for implementada.
+**Correção aplicada:** o `updateMany` da falha agora exige `status != pago` na própria condição de atualização. Um evento de falha atrasado não altera um pagamento já confirmado. O teste de regressão existente passou sem mudança de expectativa. A ampliação com cenários adicionais de eventos conflitantes fica no plano posterior ao PR #47.
 
-Executar `pnpm test:integracao` para reproduzir. Não usar `skip`, alterar a expectativa para `falhou` ou esconder o código de saída 1. Esta falha deve impedir a integração à develop enquanto não houver correção aprovada.
+**Validação da correção:** em 09/11/2026, a suíte completa aprovou os 21 cenários de comportamento (22 testes contando o agregador legado), sem falhas, ignorados, pendentes ou cancelados. `pnpm typecheck` e a checagem de tipos de todos os arquivos de testes também passaram. O container temporário foi descartado pelo executor.
+
+Executar `pnpm test:integracao` para proteger esse comportamento. Não usar `skip`, alterar a expectativa para `falhou` ou esconder códigos de erro caso haja regressão.

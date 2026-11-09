@@ -1,4 +1,5 @@
 import express, { type ErrorRequestHandler } from 'express'
+import { exigirLoginPublico } from '@geroncio/shared-db'
 import routes from './routes'
 
 const app = express()
@@ -25,6 +26,9 @@ app.get('/health', (req, res) => {
 })
 
 // Rotas da API
+// Login: obrigatório para quem chega pela internet (nginx); chamadas internas passam direto
+app.use(exigirLoginPublico())
+
 app.use(routes)
 
 // Rota não encontrada

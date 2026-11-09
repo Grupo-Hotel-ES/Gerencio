@@ -29,6 +29,12 @@ enum TipoFuncionario {
   CAIXA
 }
 
+enum PapelUsuario {
+  administrador
+  gerente
+  operador
+}
+
 enum StatusPagamento {
   pendente
   pago
@@ -52,7 +58,17 @@ model Restaurante {
   telefone            String
   cep                 String
   cidade              String
+  /// Logradouro e número juntos: é o texto usado para localizar o restaurante no mapa
   endereco            String
+  razaoSocial         String                 @default("") @map("razao_social")
+  categoria           String                 @default("Restaurante")
+  logradouro          String                 @default("")
+  numero              String                 @default("")
+  complemento         String                 @default("")
+  bairro              String                 @default("")
+  uf                  String                 @default("")
+  /// Operação da loja e preferências (horários, loja aberta, notificações...), editadas em Configurações
+  configuracoes       Json                   @default("{}")
   latitude            Float?
   longitude           Float?
   taxaEntregaBase     Decimal                @default(6.00) @map("taxa_entrega_base") @db.Decimal(10, 2)
@@ -232,6 +248,20 @@ model Entrega {
   dataHora     DateTime     @default(now()) @map("data_hora")
   pedido       Pedido       @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
   entregador   Funcionario? @relation(fields: [entregadorId], references: [id])
+}
+
+/// Pessoas que acessam o painel. O app é de um restaurante só (whitelabel), então não há vínculo com Restaurante.
+model Usuario {
+  id        Int          @id @default(autoincrement())
+  nome      String
+  /// Nome de acesso, sempre em minúsculas
+  login     String       @unique
+  email     String       @default("")
+  telefone  String       @default("")
+  papel     PapelUsuario @default(operador)
+  senhaHash String       @map("senha_hash")
+  ativo     Boolean      @default(true)
+  criadoEm  DateTime     @default(now()) @map("criado_em")
 }
 
 // Estado da conversa do chatbot do WhatsApp, uma linha por telefone.

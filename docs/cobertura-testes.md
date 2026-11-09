@@ -22,6 +22,26 @@ Comportamentos desta primeira etapa confirmados pelo responsável pelo projeto n
 
 Esta entrega é uma base simples de regressão, não cobertura integral dos fluxos críticos. As decisões de permissões, escopo dos códigos de plataforma, relatórios e exclusão de clientes continuam dependendo da confirmação do responsável.
 
+## Plano de ampliação após o PR #47
+
+Decisão do responsável em 09/11/2026: estabilizar e integrar primeiro o PR #46; em seguida integrar o PR #47; depois ampliar os testes para todas as partes do projeto. A suíte atual deve continuar executando durante essa sequência. Os itens abaixo são um plano, não cobertura já entregue nem aprovação antecipada de cada comportamento.
+
+| Parte | Cobertura a planejar após o PR #47 |
+| --- | --- |
+| Restaurantes, clientes e funcionários | CRUD, validações, vínculos, isolamento entre restaurantes e efeitos de exclusões |
+| Produtos, estoque e pedidos | Complementar as regressões existentes com limites, falhas, transações e transições de status |
+| Frete e rotas | Cálculo, seleção/ordem das paradas, exportação, limites e efeitos nos pedidos, conforme o contrato final do PR #47 |
+| Pagamentos e assinaturas | Emissão/reutilização de links, consulta, falhas externas e eventos conflitantes; acesso por assinatura quando houver modelo e regra aprovados |
+| Plataformas de delivery | Assinaturas, recebimento durável, conversão, mapeamento, reprocessamento e processamento completo |
+| Relatórios | Filtros, períodos, agregações e valores financeiros |
+| Frontend | Estados de carregamento/erro/vazio, formulários, interações, acessibilidade, responsividade e integração com APIs |
+| Chatbot/WhatsApp | Sessões, debounce, confirmação, consulta e limites, com serviços externos controlados |
+| Mock das plataformas | Contratos dos payloads, persistência própria e comunicação com o backend |
+| Autenticação e permissões | Identidades, vínculos e acessos indevidos quando esses controles estiverem implementados e definidos |
+| Fluxos de ponta a ponta | Jornadas prioritárias do usuário após aprovação específica dos cenários e ambiente |
+
+Para cada parte: inventariar o comportamento final, apresentar cenários "quando ..., então ...", obter a confirmação do responsável, implementar os testes adequados e registrar resultados e lacunas. Entregar em PRs pequenos e revisáveis por fluxo. O número de cenários não substitui essa avaliação de cobertura.
+
 ## Quinze cenários aprovados
 
 ```text
@@ -49,18 +69,17 @@ describe "Pagamento de pedido"
 
 Implementação: `backend/testes/fluxos-criticos.test.ts`. As pré-condições são cadastradas pelas APIs de restaurantes, produtos e pedidos; o registro de um link pendente é uma fixture Prisma. Nenhum pagamento real é feito. Os testes não exercitam o envio de WhatsApp, pois os pedidos usados são de balcão.
 
-Os onze cenários em `backend/testes/pedidos-estoque.test.ts` foram mantidos, com todas as asserções originais. A única alteração nesse arquivo foi acrescentar a validação de ambiente antes das importações dos serviços. O cenário legado que usa um adapter simulado continua identificado como cobertura parcial, não como request spec completo.
+Os onze cenários em `backend/testes/pedidos-estoque.test.ts` foram mantidos, com todas as asserções de negócio originais. Foram acrescentadas a validação de ambiente antes das importações e as verificações de disponibilidade das URLs das APIs para a checagem de tipos. O cenário legado que usa um adapter simulado continua identificado como cobertura parcial, não como request spec completo.
 
 ## Resultado da execução local
 
-- Data: 08/11/2026.
+- Data: 09/11/2026 (merge okita ← develop).
 - Comando: `pnpm test:integracao` na raiz.
-- Ambiente: Node.js 24, PostgreSQL 16 em container temporário e 11 migrations existentes aplicadas no banco de teste vazio.
-- Cenários de comportamento: **25 passaram e 1 falhou**, de 26 (mais o teste agregador dos 11 cenários legados).
-- O resumo do Node informa **27 testes, 26 aprovados, 1 reprovado**, porque também conta o teste agregador dos onze cenários legados.
+- Ambiente: Node.js 24, PostgreSQL 16 em container temporário e 12 migrations existentes aplicadas no banco de teste vazio.
+- Cenários de comportamento: **26 passaram e 0 falharam** (BUG-TESTE-001 corrigido pela develop).
+- O resumo do Node informa **27 testes, 27 aprovados, 0 reprovados**, incluindo o teste agregador dos onze cenários legados.
 - Ignorados, pendentes e cancelados: **zero**.
 - `pnpm typecheck` no backend: passou.
 - `pnpm exec tsc --noEmit -p testes/tsconfig.json`: passou.
-- Bug reproduzido: **BUG-TESTE-001**, descrito em `bugs-testes.md`.
 
-O comando retorna código 1 enquanto esse bug existir. O relatório TAP detalhado fica em `.resultados-testes/integracao.tap` e é recriado a cada execução. A execução remota do GitHub Actions só ocorrerá após enviar o commit; não está validada por esta execução local.
+O comando retorna código 0 após a correção do BUG-TESTE-001 integrada pela develop. O relatório TAP detalhado fica em `.resultados-testes/integracao.tap` e é recriado a cada execução.

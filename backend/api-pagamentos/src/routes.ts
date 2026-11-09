@@ -415,7 +415,8 @@ routes.post('/webhooks/stripe', async (req, res) => {
         break
       case 'checkout.session.async_payment_failed':
         await db.pagamentoPedido.updateMany({
-          where: { sessaoStripeId: evento.data.object.id },
+          // A condição atômica preserva a confirmação mesmo com eventos fora de ordem.
+          where: { sessaoStripeId: evento.data.object.id, status: { not: StatusPagamento.pago } },
           data: { status: StatusPagamento.falhou },
         })
         console.log(`[stripe] pagamento não concluído: ${evento.data.object.id}`)

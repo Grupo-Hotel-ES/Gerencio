@@ -16,8 +16,8 @@ function formatarCep(cep: string) {
 }
 
 /** Pedidos prontos com entrega (retiradas no local ficam de fora), do mais antigo para o mais novo. */
-export async function listarPedidosParaRota(restauranteId: number): Promise<Parada[]> {
-  const pedidos = await requisitar<PedidoApi[]>(`/pedidos?status=pronto&restauranteId=${restauranteId}`);
+export async function listarPedidosParaRota(): Promise<Parada[]> {
+  const pedidos = await requisitar<PedidoApi[]>('/pedidos?status=pronto');
   return pedidos
     .filter((p) => p.cepDestino.trim())
     .sort((a, b) => a.id - b.id)
@@ -29,7 +29,8 @@ export async function listarPedidosParaRota(restauranteId: number): Promise<Para
     }));
 }
 
-type EntradaRota = { restauranteId: number; pedidoIds: number[]; transporte: MeioTransporte };
+/** Sai do restaurante do app (único), resolvido pela api-pedidos. */
+type EntradaRota = { pedidoIds: number[]; transporte: MeioTransporte };
 
 // Localizar endereços no mapa (Nominatim) pode levar alguns segundos por pedido
 const TEMPO_LIMITE_ROTA_MS = 60_000;

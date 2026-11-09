@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { mkdir, readdir, readFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,6 +12,9 @@ const require = createRequire(join(backend, 'package.json'))
 const nome = `geroncio-testes-${randomBytes(6).toString('hex')}`
 const senha = randomBytes(24).toString('hex')
 const resultados = join(raiz, '.resultados-testes')
+const caminhoRelatorio = join(resultados, 'integracao.tap')
+const caminhoExecucao = join(resultados, 'execucao-integracao.json')
+const execucao = { inicio: new Date().toISOString(), revisao: null, arvoreModificada: null, container: nome, relatorioGerado: false, resultado: 'preparando' }
 let criado = false
 
 function executar(comando, argumentos, { capturar = false, env = process.env, timeout = 120_000 } = {}) {
@@ -53,6 +56,12 @@ async function limpar() {
 }
 
 async function principal() {
+  // Invalida o resultado anterior antes de qualquer etapa que possa falhar.
+  await mkdir(resultados, { recursive: true })
+  await rm(caminhoRelatorio, { force: true })
+  await writeFile(caminhoExecucao, JSON.stringify(execucao, null, 2))
+  execucao.revisao = await exigir('git', ['rev-parse', 'HEAD'], { capturar: true })
+  execucao.arvoreModificada = Boolean(await exigir('git', ['status', '--porcelain'], { capturar: true }))
   if (process.argv.length > 2) throw new Error('Este comando executa a suíte completa, sem filtros.')
   const testes = await listarTestes(join(backend, 'testes'))
   if (!testes.length) throw new Error('Nenhum teste encontrado; execução recusada.')
@@ -63,7 +72,6 @@ async function principal() {
     }
   }
   await exigir('docker', ['info', '--format', '{{.ServerVersion}}'], { capturar: true })
-  await mkdir(resultados, { recursive: true })
   console.log(`Preparando PostgreSQL exclusivo: ${nome}`)
   await exigir('docker', [
     'run', '--detach', '--name', nome, '--label', 'geroncio.finalidade=teste',
@@ -101,26 +109,36 @@ async function principal() {
   const resultado = await executar(process.execPath, [
     '--import', 'tsx', '--test', '--test-concurrency=1', '--test-timeout=60000',
     '--test-reporter=spec', '--test-reporter=tap',
-    '--test-reporter-destination=stdout', `--test-reporter-destination=${join(resultados, 'integracao.tap')}`,
+    '--test-reporter-destination=stdout', `--test-reporter-destination=${caminhoRelatorio}`,
     ...testes,
   ], { env, timeout: 300_000 })
   process.exitCode = resultado.codigo
-  const relatorio = await readFile(join(resultados, 'integracao.tap'), 'utf8')
+  const relatorio = await readFile(caminhoRelatorio, 'utf8')
+  execucao.relatorioGerado = true
   if (/# (skipped|todo|cancelled) [1-9]/.test(relatorio)) {
     console.error('A suíte contém testes ignorados, pendentes ou cancelados; resultado reprovado.')
     process.exitCode = 1
   }
-  console.log(`Relatório: ${join(resultados, 'integracao.tap')}`)
+  execucao.resultado = process.exitCode === 0 ? 'aprovado' : 'reprovado'
+  console.log(`Relatório: ${caminhoRelatorio}`)
 }
 
 try {
   await principal()
 } catch (erro) {
+  execucao.resultado = 'erro_de_execucao'
   console.error(`Não foi possível concluir os testes: ${erro.message}`)
   process.exitCode = 1
 } finally {
   try { await limpar() } catch (erro) {
+    execucao.resultado = 'erro_de_limpeza'
     console.error(`Falha ao remover o container exclusivo ${nome}: ${erro.message}`)
+    process.exitCode = 1
+  }
+  try {
+    await writeFile(caminhoExecucao, JSON.stringify({ ...execucao, fim: new Date().toISOString(), codigoSaida: process.exitCode ?? 0 }, null, 2))
+  } catch (erro) {
+    console.error(`Falha ao registrar a execução: ${erro.message}`)
     process.exitCode = 1
   }
 }
