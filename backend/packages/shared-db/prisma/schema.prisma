@@ -164,7 +164,8 @@ model Pedido {
   restauranteId   Int?         @map("restaurante_id")
   restaurante     Restaurante? @relation(fields: [restauranteId], references: [id])
   estoqueBaixado  Boolean      @default(false) @map("estoque_baixado")
-  nomeCliente     String?      @map("nome_cliente") // Add este campo
+  // O nome, o endereço e o telefone do cliente ficam em Cliente. Só pedidos de
+  // plataforma que chegam sem nome do cliente ficam sem vínculo.
   clienteId       Int?         @map("cliente_id")
   cliente         Cliente?     @relation(fields: [clienteId], references: [id])
   preco           Decimal      @db.Decimal(10, 2)

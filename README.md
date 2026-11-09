@@ -158,6 +158,7 @@ Produção em uma VPS Ubuntu com Docker (Postgres + APIs), nginx (frontend está
 
 ```
 https://geroncio.exemplo.com/                  → frontend (/var/www/geroncio)
+https://geroncio.exemplo.com/svc/clientes/     → 127.0.0.1:3001
 https://geroncio.exemplo.com/svc/pedidos/      → 127.0.0.1:3002
 https://geroncio.exemplo.com/svc/restaurantes/ → 127.0.0.1:3003
 https://geroncio.exemplo.com/svc/produtos/     → 127.0.0.1:3004
@@ -240,6 +241,7 @@ curl -s localhost:3002/health
 `frontend/.env` (os valores entram no código no build):
 
 ```env
+EXPO_PUBLIC_API_CLIENTES_URL=https://geroncio.exemplo.com/svc/clientes/api
 EXPO_PUBLIC_API_PEDIDOS_URL=https://geroncio.exemplo.com/svc/pedidos/api
 EXPO_PUBLIC_API_PRODUTOS_URL=https://geroncio.exemplo.com/svc/produtos
 EXPO_PUBLIC_API_RESTAURANTES_URL=https://geroncio.exemplo.com/svc/restaurantes/api
@@ -294,6 +296,7 @@ server {
     }
 
     # A barra no fim do proxy_pass tira o prefixo /svc/<nome>
+    location /svc/clientes/     { proxy_pass http://127.0.0.1:3001/; include /etc/nginx/proxy_geroncio.conf; }
     location /svc/pedidos/      { proxy_pass http://127.0.0.1:3002/; include /etc/nginx/proxy_geroncio.conf; }
     location /svc/restaurantes/ { proxy_pass http://127.0.0.1:3003/; include /etc/nginx/proxy_geroncio.conf; }
     location /svc/produtos/     { proxy_pass http://127.0.0.1:3004/; include /etc/nginx/proxy_geroncio.conf; }

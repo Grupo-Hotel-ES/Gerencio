@@ -10,6 +10,7 @@ import {
   mudarStatusPedido,
   cotarFreteRestaurante,
   resolverRestauranteId,
+  obterOuCriarCliente,
 } from '@geroncio/shared-db'
 
 const routes = Router()
@@ -17,6 +18,7 @@ const incluirPedido = {
   itens: { include: { produto: true } },
   entrega: { include: { entregador: true } },
   restaurante: true,
+  cliente: { select: { id: true, nomeCliente: true, endereco: true, telefone: true } },
   // Links de pagamento online (api-pagamentos), do mais recente para o mais antigo
   pagamentos: { select: { status: true, expiraEm: true }, orderBy: { criadoEm: 'desc' } },
 } as const
@@ -145,8 +147,10 @@ routes.get('/pedidos/:id', async (req, res) => {
 // 4. CRIAR PEDIDO (COM CÁLCULO E REGISTRO DA TAXA DE ENTREGA E DISTÂNCIA VIÁRIA PARA WHATSAPP)
 routes.post('/pedidos', async (req, res) => {
   const {
-    nomeCliente,
+    cliente,
     clienteId,
+    nomeCliente,
+    telefoneCliente,
     preco,
     metodoPagamento,
     app,
@@ -178,6 +182,27 @@ routes.post('/pedidos', async (req, res) => {
 
   if (!itens || !Array.isArray(itens) || itens.length === 0) {
     res.status(400).json({ error: 'O pedido deve conter ao menos 1 item' })
+    return
+  }
+
+  // Cliente: clienteId de um cadastro existente ou `cliente` ({ nome, endereco, telefone? }),
+  // cadastrado junto com o pedido. `nomeCliente`/`telefoneCliente` (chatbot) usam o
+  // endereço de entrega como endereço do cliente.
+  const idCliente = clienteId === undefined || clienteId === null ? null : parseId(String(clienteId))
+  if (idCliente === null && clienteId !== undefined && clienteId !== null) {
+    res.status(400).json({ error: 'clienteId inválido' })
+    return
+  }
+  if (cliente !== undefined && cliente !== null && (typeof cliente !== 'object' || Array.isArray(cliente))) {
+    res.status(400).json({ error: 'cliente deve ter nome, endereco e telefone (opcional)' })
+    return
+  }
+  const dadosCliente = cliente
+    ? { nome: cliente.nome, endereco: cliente.endereco, telefone: cliente.telefone }
+    : { nome: nomeCliente, endereco: enderecoDestino, telefone: telefoneCliente }
+  if (idCliente === null && cliente && (typeof cliente.nome !== 'string' || !cliente.nome.trim()
+    || typeof cliente.endereco !== 'string' || !cliente.endereco.trim())) {
+    res.status(400).json({ error: 'Informe o nome e o endereço do cliente' })
     return
   }
 
@@ -252,6 +277,7 @@ routes.post('/pedidos', async (req, res) => {
       const restaurante = restauranteId === undefined ? undefined : parseId(String(restauranteId))
       if (restaurante === null) throw new ErroOperacao(400, 'restauranteId inválido')
       const preparados = await prepararItensPedido(tx, itens, restaurante)
+      const clienteDoPedido = await obterOuCriarCliente(tx, idCliente, dadosCliente)
       // Nos pedidos manuais o valor vem do catálogo, sem confiar no total enviado pela tela.
       const total = ['balcao', 'whatsapp'].includes(canal) ? preparados.preco : Number(preco)
       if (!Number.isFinite(Number(total)) || Number(total) < 0 || Number(total) > 99_999_999.99) {
@@ -260,8 +286,7 @@ routes.post('/pedidos', async (req, res) => {
       return tx.pedido.create({
         data: {
           restauranteId: preparados.restauranteId,
-          nomeCliente: nomeCliente || null,
-          clienteId: clienteId ? Number(clienteId) : null,
+          clienteId: clienteDoPedido?.id ?? null,
           preco: total,
           metodoPagamento,
           app: canal,
