@@ -1,21 +1,38 @@
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Modal, StyleSheet, View } from 'react-native';
 
 import { Campo } from './formularios';
 import { Botao, Cartao, Chip, Texto } from './ui';
 import { Espacamento } from '@/constants/tokens';
+import { descreverCliente, type Cliente } from '@/data/clientes';
 import { formatarReais } from '@/data/pedidos';
+import { useCores } from '@/hooks/use-cores';
+import { buscarClientesSemelhantes } from '@/services/api-clientes';
 import { cotarFrete, criarPedido, type CotacaoFrete, type NovoPedido } from '@/services/api-pedidos';
 import { listarProdutos, type Produto } from '@/services/api-produtos';
 
+type CampoCliente = 'nome' | 'endereco';
+
+/** Aviso de cliente já cadastrado com o nome ou o endereço digitado. */
+type Sugestao = { campo: CampoCliente; clientes: Cliente[] };
+
+const mesmoTexto = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
 export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: () => void; onFechar: () => void }) {
+  const cores = useCores();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [quantidades, setQuantidades] = useState<Record<number, number>>({});
+  // Cliente: escolhido no aviso (clienteId) ou cadastrado junto com o pedido
   const [nomeCliente, setNomeCliente] = useState('');
+  const [enderecoCliente, setEnderecoCliente] = useState('');
+  const [telefone, setTelefone] = useState('');
+  const [clienteId, setClienteId] = useState<number | null>(null);
+  const [sugestao, setSugestao] = useState<Sugestao | null>(null);
+  // Clientes que a pessoa já disse que não são o deste pedido: o aviso não volta para eles
+  const recusados = useRef(new Set<number>());
   const [canal, setCanal] = useState<NovoPedido['app']>('balcao');
   const [pagamento, setPagamento] = useState('dinheiro');
   const [retirada, setRetirada] = useState(true);
-  const [endereco, setEndereco] = useState('');
   const [cep, setCep] = useState('');
   const [erro, setErro] = useState<string | null>(null);
   // A cotação vale para o endereço e o CEP em que foi feita (chave)
@@ -36,10 +53,43 @@ export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: () => v
 
   const itens = produtos.filter((p) => quantidades[p.id] > 0).map((p) => ({ produtoId: p.id, quantidade: quantidades[p.id] }));
   const subtotal = produtos.reduce((soma, p) => soma + p.preco * (quantidades[p.id] ?? 0), 0);
+  const endereco = enderecoCliente;
   const chaveFrete = `${endereco.trim()}|${cep.trim()}`;
   const cotacao = !retirada && frete?.chave === chaveFrete ? frete.cotacao : null;
   const taxaEntrega = cotacao?.taxaEntrega ?? 0;
   const total = subtotal + taxaEntrega;
+
+  // Ao sair do campo de nome ou de endereço, procura um cliente com o mesmo valor
+  const verificarCliente = async (campo: CampoCliente) => {
+    const valor = campo === 'nome' ? nomeCliente : enderecoCliente;
+    if (clienteId !== null || !valor.trim()) return;
+    try {
+      const encontrados = await buscarClientesSemelhantes(campo === 'nome' ? { nome: valor } : { endereco: valor });
+      const novos = encontrados.filter((c) => !recusados.current.has(c.id)).slice(0, 3);
+      if (novos.length > 0) setSugestao((atual) => atual ?? { campo, clientes: novos });
+    } catch {
+      // Sem a api-clientes, o pedido segue e o cliente é cadastrado junto
+    }
+  };
+
+  const preencherCliente = (cliente: Cliente) => {
+    setNomeCliente(cliente.nome);
+    setEnderecoCliente(cliente.endereco);
+    setTelefone(cliente.telefone ?? '');
+    setClienteId(cliente.id);
+    setSugestao(null);
+  };
+
+  const recusarSugestao = () => {
+    sugestao?.clientes.forEach((c) => recusados.current.add(c.id));
+    setSugestao(null);
+  };
+
+  // Mudar o nome ou o endereço desfaz a escolha do cadastro existente
+  const editarCliente = (campo: CampoCliente, valor: string) => {
+    if (campo === 'nome') setNomeCliente(valor); else setEnderecoCliente(valor);
+    setClienteId(null);
+  };
 
   const calcularFrete = async () => {
     if (!endereco.trim() || !cep.trim()) { setErroFrete('Informe o endereço e o CEP.'); return; }
@@ -54,15 +104,19 @@ export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: () => v
 
   const salvar = async () => {
     if (enviando.current) return;
-    if (!nomeCliente.trim() || itens.length === 0 || (!retirada && (!endereco.trim() || !cep.trim()))) {
-      setErro('Informe cliente, produtos e o endereço com CEP para entrega.'); return;
+    if (!nomeCliente.trim() || !enderecoCliente.trim() || itens.length === 0 || (!retirada && !cep.trim())) {
+      setErro('Informe nome e endereço do cliente, produtos e o CEP para entrega.'); return;
     }
     if (cotacao && cotacao.taxaEntrega === null) {
       setErro(cotacao.motivoRecusa ?? 'Endereço fora da área de entrega.'); return;
     }
     enviando.current = true; setSalvando(true); setErro(null);
     try {
-      await criarPedido({ nomeCliente: nomeCliente.trim(), app: canal, metodoPagamento: pagamento,
+      await criarPedido({
+        ...(clienteId !== null
+          ? { clienteId }
+          : { cliente: { nome: nomeCliente.trim(), endereco: enderecoCliente.trim(), telefone: telefone.trim() } }),
+        app: canal, metodoPagamento: pagamento,
         enderecoDestino: retirada ? 'Retirada no balcão' : endereco.trim(), cepDestino: retirada ? '' : cep.trim(), itens,
         // Sem cotação na tela, a api-pedidos calcula o frete ao criar a entrega
         ...(cotacao?.taxaEntrega != null && {
@@ -76,8 +130,36 @@ export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: () => v
 
   return (
     <Cartao style={styles.formulario}>
+      <Modal visible={sugestao !== null} transparent animationType="fade" onRequestClose={recusarSugestao}>
+        <View style={styles.fundoModal}>
+          <View style={[StyleSheet.absoluteFill, styles.veu, { backgroundColor: cores.textoPrincipal }]} />
+          <Cartao style={styles.modal} accessibilityRole="alert">
+            <Texto tamanho={18} peso={600}>Cliente já cadastrado</Texto>
+            {sugestao?.clientes.map((c) => {
+              const mesmoNome = mesmoTexto(c.nome, nomeCliente);
+              const mesmoEndereco = mesmoTexto(c.endereco, enderecoCliente);
+              const motivo = mesmoNome && mesmoEndereco ? 'nome e endereço' : mesmoNome ? 'nome' : 'endereço';
+              return (
+                <View key={c.id} style={styles.sugestao}>
+                  <Texto>Já há um cliente com esse {motivo} ({descreverCliente(c)}). Preencher?</Texto>
+                  <Botao rotulo="Preencher" variante="primario" onPress={() => preencherCliente(c)} />
+                </View>
+              );
+            })}
+            <Botao rotulo="Não, é outro cliente" onPress={recusarSugestao} />
+          </Cartao>
+        </View>
+      </Modal>
       <Texto tamanho={20} peso={600}>Novo pedido manual</Texto>
-      <Campo rotulo="Nome do cliente" value={nomeCliente} onChangeText={setNomeCliente} editable={!salvando} />
+      <Texto peso={500}>Cliente</Texto>
+      <Campo rotulo="Nome do cliente" value={nomeCliente} onChangeText={(v) => editarCliente('nome', v)}
+        onBlur={() => verificarCliente('nome')} editable={!salvando} />
+      <Campo rotulo="Endereço do cliente" value={enderecoCliente} onChangeText={(v) => editarCliente('endereco', v)}
+        onBlur={() => verificarCliente('endereco')} editable={!salvando} />
+      <Campo rotulo="Telefone (opcional)" value={telefone} onChangeText={setTelefone} keyboardType="phone-pad" editable={!salvando} />
+      <Texto cor="textoSecundario">
+        {clienteId !== null ? 'Cliente já cadastrado.' : 'Se o cliente não estiver cadastrado, ele é cadastrado junto com o pedido.'}
+      </Texto>
       <View style={styles.linha}>
         {(['balcao', 'whatsapp'] as const).map((c) => <Chip key={c} rotulo={c === 'balcao' ? 'Balcão' : 'WhatsApp'} ativo={canal === c} onPress={salvando ? undefined : () => setCanal(c)} />)}
       </View>
@@ -89,7 +171,7 @@ export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: () => v
         <Chip rotulo="Retirada" ativo={retirada} onPress={salvando ? undefined : () => setRetirada(true)} />
         <Chip rotulo="Entrega" ativo={!retirada} onPress={salvando ? undefined : () => setRetirada(false)} />
       </View>
-      {!retirada && <><Campo rotulo="Endereço de entrega" value={endereco} onChangeText={setEndereco} editable={!salvando} />
+      {!retirada && <><Texto cor="textoSecundario">A entrega vai para o endereço do cliente.</Texto>
         <Campo rotulo="CEP" value={cep} onChangeText={setCep} editable={!salvando} />
         <View style={styles.linha}>
           <Botao rotulo={cotando ? 'Calculando…' : 'Calcular frete'} icone="motoboy" disabled={salvando || cotando} onPress={calcularFrete} />
@@ -130,4 +212,8 @@ const styles = StyleSheet.create({
   formulario: { gap: Espacamento.large },
   linha: { flexDirection: 'row', flexWrap: 'wrap', gap: Espacamento.small, alignItems: 'center' },
   nome: { flex: 1, minWidth: 160 },
+  fundoModal: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: Espacamento.large },
+  veu: { opacity: 0.4 },
+  modal: { width: '100%', maxWidth: 480, gap: Espacamento.medium },
+  sugestao: { gap: Espacamento.small, alignItems: 'flex-start' },
 });

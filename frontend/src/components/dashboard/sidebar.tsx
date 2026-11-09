@@ -13,6 +13,7 @@ const NAVEGACAO: { rotulo: string; icone: NomeIcone; href?: Href }[] = [
   { rotulo: 'Estoque', icone: 'estoque', href: '/estoque' },
   { rotulo: 'Relatórios', icone: 'relatorios', href: '/relatorios' },
   { rotulo: 'Motoboys', icone: 'motoboy', href: '/motoboys' as Href },
+  { rotulo: 'Clientes', icone: 'usuario', href: '/clientes' as Href },
   { rotulo: 'Rotas', icone: 'rotas', href: '/rotas' },
   { rotulo: 'Configurações', icone: 'configuracoes', href: '/configuracoes' },
 ];

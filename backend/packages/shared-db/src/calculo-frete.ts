@@ -344,6 +344,12 @@ export async function obterCoordenadasRestaurante(restaurante: {
     return { latitude: restaurante.latitude, longitude: restaurante.longitude }
   }
 
+  if (!restaurante.endereco.trim() && !restaurante.cep.trim()) {
+    throw new Error(
+      'Endereço do restaurante não cadastrado. Preencha o endereço em Configurações → Estabelecimento',
+    )
+  }
+
   // Mensagem própria: o problema é o cadastro do restaurante, não o endereço do cliente
   const geo = await obterCoordenadasEndereco({
     endereco: restaurante.endereco,

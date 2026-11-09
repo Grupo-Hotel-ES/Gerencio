@@ -1,6 +1,6 @@
 import { Router, type Request } from 'express'
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { db, prepararItensPedido, type Prisma } from '@geroncio/shared-db'
+import { db, obterOuCriarCliente, prepararItensPedido, type Prisma } from '@geroncio/shared-db'
 
 const routes = Router()
 
@@ -356,10 +356,15 @@ async function salvarPedido(
     }
 
     const preparados = await prepararItensPedido(tx, await mapearItens(tx, plataforma, pedido.itens))
+    // Sem nome do cliente no payload da plataforma, o pedido fica sem cliente
+    const cliente = await obterOuCriarCliente(tx, null, {
+      nome: pedido.nomeCliente ?? '',
+      endereco: pedido.enderecoDestino,
+    })
     const data: Prisma.PedidoCreateInput = {
       restaurante: { connect: { id: preparados.restauranteId } },
       pedidoExternoId: pedidoIdExterno,
-      nomeCliente: pedido.nomeCliente,
+      ...(cliente && { cliente: { connect: { id: cliente.id } } }),
       preco: pedido.preco,
       metodoPagamento: pedido.metodoPagamento,
       app: plataforma,

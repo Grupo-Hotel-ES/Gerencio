@@ -66,6 +66,20 @@ Implementação: `backend/testes/fluxos-criticos.test.ts`. As pré-condições s
 
 Os onze cenários em `backend/testes/pedidos-estoque.test.ts` foram mantidos, com todas as asserções de negócio originais. Foram acrescentadas a validação de ambiente antes das importações e as verificações de disponibilidade das URLs das APIs para a checagem de tipos. O cenário legado que usa um adapter simulado continua identificado como cobertura parcial, não como request spec completo.
 
+## Cliente do pedido (aprovados em 09/11/2026)
+
+```text
+describe "Cliente do pedido"
+  it "quando o pedido traz um cliente novo, então o cliente é cadastrado e o pedido aponta para ele"
+  it "quando o nome e o endereço já existem, com maiúsculas diferentes, então o cadastro existente é reaproveitado"
+  it "quando o pedido traz um clienteId que não existe, então a API responde 400"
+  it "quando o cliente vem sem endereço, então a API responde 400"
+  it "quando um cliente tem pedidos, então a exclusão é recusada com 409"
+  it "quando uma plataforma envia um pedido sem nome do cliente, então o pedido fica sem cliente"
+```
+
+Implementação: `backend/testes/clientes-pedidos.test.ts`, pelas APIs de clientes e de pedidos; o cenário da plataforma usa o mesmo adapter simulado do teste legado do iFood. Resultado local: 28 testes no resumo do Node, todos aprovados. Lacunas: o aviso "Já há um cliente com esse nome/endereço" do formulário do painel e o envio do telefone pelo chatbot não têm teste automatizado.
+
 ## Resultado da execução local
 
 - Data: 02/11/2026.

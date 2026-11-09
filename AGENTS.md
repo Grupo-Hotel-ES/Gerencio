@@ -17,7 +17,7 @@ O Gerôncio centraliza pedidos de várias plataformas de delivery (iFood, Rappi,
 ```
 .
 ├── backend/          # Microsserviços Express + Prisma (pnpm workspace)
-│   ├── api-clientes/       # :3001  CRUD de clientes
+│   ├── api-clientes/       # :3001  CRUD e busca de clientes (nome, endereço, telefone)
 │   ├── api-pedidos/        # :3002  pedidos, status, entregador, relatório de vendas, frete e rotas de entrega
 │   ├── api-restaurantes/   # :3003  restaurante (único), login e usuários
 │   ├── api-produtos/       # :3004  produtos e mapeamentos produto ↔ id externo da plataforma
@@ -120,6 +120,7 @@ O app é **whitelabel**: atende um restaurante só. A tabela `Restaurante` conti
 - Para mudar o schema: edite `prisma/schema.prisma` e rode `pnpm db:migrate` com um nome descritivo em português (ex.: `adiciona_nome_cliente`). Nunca edite migrations já commitadas.
 - `Decimal` (preços) chega ao frontend como **string** no JSON; converta com `Number(...)`.
 - Status de pedido: `novo → em_preparo → pronto → saiu_para_entrega → entregue` (ou `cancelado`).
+- **Cliente do pedido**: o pedido não guarda o nome em texto; aponta para `Cliente` (`clienteId`, devolvido como `cliente` pela `api-pedidos`). `POST /api/pedidos` recebe `clienteId` ou `cliente: { nome, endereco, telefone? }`; sem `clienteId`, `obterOuCriarCliente` (`shared-db/src/clientes.ts`) reaproveita quem tem o mesmo nome e endereço (sem diferenciar maiúsculas) ou cadastra junto. `nomeCliente`/`telefoneCliente` ainda são aceitos (chatbot), com o endereço de entrega como endereço do cliente. A `api-integracao` faz o mesmo com os pedidos das plataformas; sem nome no payload, o pedido fica sem cliente. Cliente com pedidos não pode ser excluído.
 - Variáveis de ambiente ficam em `backend/.env` (carregado por `--env-file-if-exists`). `DATABASE_URL` padrão: `postgresql://geroncio:geroncio_dev@localhost:5432/geroncio`.
 
 ### Chatbot (n8n)
@@ -175,12 +176,13 @@ Simula o "mundo externo": o formulário web (`mock_frontend`, :3000) monta pedid
 ## Frontend (`frontend/`)
 
 - **Expo SDK 57** + expo-router + React Native 0.86 + React 19. As APIs do Expo mudaram: consulte https://docs.expo.dev/versions/v57.0.0/ antes de escrever código (ver `frontend/AGENTS.md`).
-- Rotas em `src/app/`. As páginas do painel ficam no grupo `(painel)/` (`index` = pedidos, `estoque`, `relatorios`), com layout de sidebar + top bar em `(painel)/_layout.tsx`.
+- Rotas em `src/app/`. As páginas do painel ficam no grupo `(painel)/` (`index` = pedidos, `estoque`, `relatorios`, `clientes`...), com layout de sidebar + top bar em `(painel)/_layout.tsx`.
 - Componentes do painel em `src/components/dashboard/` (`ui.tsx` tem os primitivos e o mapa de ícones `ICONES`, com nomes SF Symbols / Material por plataforma).
 - **Cores e espaçamentos só via tokens**: `useCores()` (`src/hooks/use-cores.ts`) e `Espacamento`/`Raio` de `src/constants/tokens.ts`. Não use cores hex soltas nos componentes. Os tokens espelham `src/design-system/variables/*.json` (exportados do Figma); se mudar um, mude o outro.
 - Os protótipos de cada tela (web e mobile) estão em `src/design-system/prototypes/` — use-os como referência visual ao implementar uma página.
 - Chamadas HTTP em `src/services/api-*.ts`. A URL base vem de `EXPO_PUBLIC_API_*_URL` com fallback para `localhost`. Cada serviço converte o formato da API para o tipo da UI (em `src/data/`).
 - O layout é responsivo: com largura ≥ 960 aparece a sidebar; abaixo disso, a navegação compacta.
+- **Relatório em PDF**: o botão "Exportar PDF" de `relatorios` monta um HTML (`data/relatorio-html.ts`) e chama `exportarPdf` (`services/exportar-pdf.ts`). No app, abre a impressão do sistema com `expo-print`, onde se salva ou compartilha o PDF. Na web (`exportar-pdf.web.ts`), imprime um iframe só com o relatório, porque o `expo-print` na web imprime a página inteira; o usuário escolhe "Salvar como PDF". O `expo-sharing` ficou de fora: a versão do SDK 57 depende de um pacote barrado pelo `minimumReleaseAge` do pnpm.
 - Estilo de código: aspas simples, com ponto e vírgula, `StyleSheet.create` no fim do arquivo.
 
 ## Git
