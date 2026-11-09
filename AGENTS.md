@@ -51,7 +51,19 @@ Na raiz (atalhos definidos em `package.json`):
 Dentro de `backend/`: `pnpm typecheck` (roda `tsc --noEmit` em todos os pacotes), `pnpm db:generate`, `pnpm docker:logs`, `pnpm docker:down` (derruba tudo, inclusive o chatbot), `pnpm chatbot:up:gpu`, `pnpm chatbot:down`.
 Dentro de `frontend/`: `pnpm web`, `pnpm android`, `pnpm ios`, `pnpm lint`.
 
-**Antes de concluir uma mudança**, rode `pnpm typecheck` em `backend/` e/ou `pnpm lint` em `frontend/`. Não há testes automatizados; os testes manuais das rotas ficam em `testes/*.http`.
+**Antes de concluir uma mudança**, rode `pnpm typecheck` em `backend/` e/ou `pnpm lint` em `frontend/`. Para mudanças no backend, execute também `pnpm test:integracao` na raiz: usa HTTP real e PostgreSQL em container exclusivo. Os roteiros manuais continuam em `testes/*.http`.
+
+### Regras obrigatórias de testes
+
+- Política acordada em 09/11/2026: concluir a base de regressão e as correções do PR #46, integrar as rotas do PR #47 e então ampliar a cobertura para todas as partes do projeto, em PRs pequenos por fluxo. Consulte o plano em [docs/cobertura-testes.md](docs/cobertura-testes.md#plano-de-ampliação-após-o-pr-47).
+- Durante essa sequência, preservar a suíte existente e adicionar regressões necessárias às correções. A ampliação planejada não dispensa corrigir falhas conhecidas ou executar os checks antes de integrar.
+- Leia [docs/regras-de-testes.md](docs/regras-de-testes.md) antes de criar ou alterar testes. Use `node:test`, `assert` e `tsx`, já presentes no projeto.
+- Apresente as frases `describe` / `it` em português (“quando ..., então ...”) e espere a confirmação do responsável antes de implementar comportamentos novos.
+- Não apague, pule (`skip`, `todo`, `only`) ou afrouxe testes/asserções para obter aprovação. Se um teste parecer errado, pare e pergunte.
+- Teste a rota HTTP real e o banco de teste real. Simule somente serviços externos; nunca o banco, as regras de negócio ou as permissões sob teste.
+- Falha por bug real permanece falhando e deve ser registrada em [docs/bugs-testes.md](docs/bugs-testes.md). Não mude a aplicação ou a expectativa apenas para ocultar o resultado de uma tarefa de diagnóstico.
+- Execute pela raiz com `pnpm test:integracao`; nunca use bancos/credenciais de desenvolvimento ou produção. Novas migrations precisam de revisão do responsável antes de executar.
+- Preserve os cenários existentes, confira os efeitos no banco e use `Promise.all` para requisições simultâneas. Documente as limitações da cobertura e reporte o resultado real.
 
 ## Backend
 
@@ -174,6 +186,6 @@ Simula o "mundo externo": o formulário web (`mock_frontend`, :3000) monta pedid
 ## Git
 
 - Fluxo: cada integrante trabalha em sua branch (`cahu`, `fraga`, `okita`...), abre PR para `develop`, e `develop` vai para `main`.
-- **Push na `develop` publica o site**: `.github/workflows/deploy.yml` roda o typecheck e então `scripts/deploy.sh` na VPS por SSH (migrations, containers, build web). Ver "Atualizar (CI/CD)" no README.
+- **Push na `develop` publica o site**: `.github/workflows/deploy.yml` roda os testes de integração e o typecheck e então `scripts/deploy.sh` na VPS por SSH (migrations, containers, build web). Ver "Atualizar (CI/CD)" no README.
 - Mensagens de commit curtas, no imperativo (`Add página Relatório`, `Create dashboard page`). Português ou inglês são aceitos; seja consistente dentro de uma mesma PR.
 - Não faça commit, push ou PR sem pedido explícito.

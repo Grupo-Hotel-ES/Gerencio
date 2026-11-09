@@ -22,6 +22,7 @@ jobs:
   verificar:
     name: Verificar
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -31,11 +32,14 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Backend — dependências
         working-directory: backend
         run: pnpm install --frozen-lockfile
+
+      - name: Backend — testes de integração
+        run: pnpm test:integracao
 
       - name: Backend — typecheck
         working-directory: backend

@@ -146,6 +146,12 @@ pnpm mock:studio
 
 O banco e a API continuam rodando depois de fechar o formulário; para derrubá-los, use `cd mock && pnpm db:down`.
 
+> **Status:** frontend e backend estão em desenvolvimento. A suíte de integração exercita APIs reais com PostgreSQL isolado em Docker; a cobertura atual está documentada abaixo.
+
+### Política de testes
+
+Primeiro estabilizamos a base de testes do PR #46 e integramos o PR #47 de rotas. Depois ampliaremos a cobertura de todas as partes do projeto em PRs pequenos por fluxo, com cenários aprovados e resultados documentados. Durante essa sequência, os testes existentes continuam obrigatórios e as falhas conhecidas devem ser corrigidas. Leia as [regras de testes](docs/regras-de-testes.md) e o [plano de cobertura](docs/cobertura-testes.md#plano-de-ampliação-após-o-pr-47).
+
 ## Deploy (VPS)
 
 Produção em uma VPS Ubuntu com Docker (Postgres + APIs), nginx (frontend estático + proxy das APIs) e HTTPS pelo Let's Encrypt. Tudo fica no mesmo domínio; nos exemplos, `geroncio.exemplo.com` (sem domínio próprio, use `<ip-com-hífens>.sslip.io`, que já resolve para o IP).
@@ -310,7 +316,7 @@ certbot --nginx -d geroncio.exemplo.com --redirect   # cria o bloco 443 e agenda
 
 ### Atualizar (CI/CD)
 
-Todo push na `develop` dispara `.github/workflows/deploy.yml`: o job **Verificar** roda o typecheck do backend e o lint do frontend (o lint ainda só avisa), e o job **Publicar na VPS** entra por SSH e roda `scripts/deploy.sh`, que faz checkout da `develop`, aplica as migrations, reconstrói os containers, gera o build web, copia para `/var/www/geroncio` e testa o `/health` das APIs. Os arquivos `.env` e o override ficam como estão. Também dá para disparar pela aba Actions (*Run workflow*).
+Todo push na `develop` dispara `.github/workflows/deploy.yml`: o job **Verificar** roda os testes de integração e o typecheck do backend e o lint do frontend (o lint ainda só avisa), e o job **Publicar na VPS** entra por SSH e roda `scripts/deploy.sh`, que faz checkout da `develop`, aplica as migrations, reconstrói os containers, gera o build web, copia para `/var/www/geroncio` e testa o `/health` das APIs. Os arquivos `.env` e o override ficam como estão. Também dá para disparar pela aba Actions (*Run workflow*).
 
 Configuração, feita uma vez:
 
@@ -324,8 +330,6 @@ ssh-keyscan <vps>                     # saída vai no segredo VPS_KNOWN_HOSTS
 No GitHub, em *Settings → Secrets and variables → Actions*, crie `VPS_HOST`, `VPS_USER` (ex.: `root`), `VPS_SSH_KEY` (conteúdo de `geroncio_deploy`) e `VPS_KNOWN_HOSTS`. `VPS_PORT` (padrão 22) e `VPS_DIR` (padrão `/root/Gerencio`) são opcionais. O job usa o environment `producao`, onde dá para exigir aprovação antes de publicar.
 
 Para atualizar à mão na VPS: `bash scripts/deploy.sh` na pasta do repositório.
-
-> **Status:** o frontend está em desenvolvimento e o backend ainda não foi implementado — `backend/` contém apenas a configuração inicial do pacote.
 
 ---
 
@@ -343,3 +347,7 @@ Para atualizar à mão na VPS: `bash scripts/deploy.sh` na pasta do repositório
 ## Documentação
 
 - [Pitch do projeto](docs/Eng.%20Software%20-%20PITCH.pdf)
+- [Conceitos de testes para a equipe](docs/conceitos-de-testes.md)
+- [Regras de testes e execução da suíte](docs/regras-de-testes.md)
+- [Cobertura atual dos testes](docs/cobertura-testes.md)
+- [Análise do PR #46 e rebase da branch lucas](docs/analise-pr-46.md)

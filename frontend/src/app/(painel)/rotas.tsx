@@ -36,10 +36,14 @@ export default function PlanejarRota() {
   const [erro, setErro] = useState<string | null>(null);
   // A rota começa com todos os prontos só na primeira carga (e de novo depois de exportar)
   const preenchida = useRef(false);
+  const ultimaCarga = useRef(0);
+  const operacaoEmCurso = useRef(false);
 
-  const carregarPedidos = useCallback(async () => {
+  const carregarPedidos = useCallback(async (aindaAtivo: () => boolean = () => true) => {
+    const carga = ++ultimaCarga.current;
     try {
       const dados = await listarPedidosParaRota();
+      if (!aindaAtivo() || carga !== ultimaCarga.current) return;
       setProntos(dados);
       // Na primeira carga, a rota começa com todos os prontos (até o limite). Depois, mantém
       // a ordem escolhida e só tira da rota quem deixou de estar pronto.
@@ -51,15 +55,18 @@ export default function PlanejarRota() {
         return atuais.filter((p) => porId.has(p.id)).map((p) => porId.get(p.id)!);
       });
     } catch (e) {
+      if (!aindaAtivo() || carga !== ultimaCarga.current) return;
       setErro((e as Error).message);
+      setProntos((atuais) => atuais ?? []);
     }
   }, []);
 
   useEffect(() => {
+    let ativo = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- carregarPedidos atualiza o estado somente após a resposta HTTP.
-    carregarPedidos();
-    const intervalo = setInterval(carregarPedidos, INTERVALO_ATUALIZACAO_MS);
-    return () => clearInterval(intervalo);
+    carregarPedidos(() => ativo);
+    const intervalo = setInterval(() => carregarPedidos(() => ativo), INTERVALO_ATUALIZACAO_MS);
+    return () => { ativo = false; clearInterval(intervalo); };
   }, [carregarPedidos]);
 
   const partida: PontoPartida | null = restaurante
@@ -75,7 +82,8 @@ export default function PlanejarRota() {
   const ocupado = calculando || exportando;
 
   const visualizar = async () => {
-    if (pedidoIds.length === 0) return;
+    if (operacaoEmCurso.current || pedidoIds.length === 0) return;
+    operacaoEmCurso.current = true;
     setCalculando(true); setErro(null);
     try {
       const dados = await calcularRota({ pedidoIds, transporte });
@@ -83,12 +91,14 @@ export default function PlanejarRota() {
     } catch (e) {
       setErro((e as Error).message);
     } finally {
+      operacaoEmCurso.current = false;
       setCalculando(false);
     }
   };
 
   const exportar = async () => {
-    if (pedidoIds.length === 0) return;
+    if (operacaoEmCurso.current || pedidoIds.length === 0) return;
+    operacaoEmCurso.current = true;
     setExportando(true); setErro(null);
     try {
       const resultado = await exportarRota({ pedidoIds, transporte });
@@ -99,6 +109,7 @@ export default function PlanejarRota() {
     } catch (e) {
       setErro((e as Error).message);
     } finally {
+      operacaoEmCurso.current = false;
       setExportando(false);
     }
   };
@@ -107,7 +118,7 @@ export default function PlanejarRota() {
     <Pagina
       titulo="Planejar rota"
       subtitulo="Monte a rota com os pedidos prontos, confira o percurso no mapa e envie ao entregador.">
-      <RotaFormulario nome={nome} onNome={setNome} transporte={transporte} onTransporte={setTransporte} />
+      <RotaFormulario nome={nome} onNome={setNome} transporte={transporte} onTransporte={setTransporte} desabilitado={ocupado} />
 
       {erro && (
         <Cartao style={[styles.erro, { borderColor: cores.feedbackErro }]}>
@@ -129,13 +140,14 @@ export default function PlanejarRota() {
           />
         </View>
         <View style={duasColunas ? styles.direita : styles.coluna}>
-          <RotaMapa rota={rotaAtual} calculando={calculando} altura={duasColunas ? 460 : 340} />
+          <RotaMapa rota={rotaAtual} paradas={paradas} calculando={calculando} altura={duasColunas ? 460 : 340} />
           <RotaResumo
             partida={partida}
             paradas={paradas}
             rota={rotaAtual}
             onExportar={exportar}
             exportando={exportando}
+            calculando={calculando}
             exportada={exportada}
             onFecharExportacao={() => { setExportada(null); setRota(null); }}
           />
