@@ -144,7 +144,11 @@ pnpm mock:studio
 
 O banco e a API continuam rodando depois de fechar o formulário; para derrubá-los, use `cd mock && pnpm db:down`.
 
-> **Status:** o frontend está em desenvolvimento e o backend ainda não foi implementado — `backend/` contém apenas a configuração inicial do pacote.
+> **Status:** frontend e backend estão em desenvolvimento. A suíte de integração exercita APIs reais com PostgreSQL isolado em Docker; a cobertura atual está documentada abaixo.
+
+### Política de testes
+
+Primeiro estabilizamos a base de testes do PR #46 e integramos o PR #47 de rotas. Depois ampliaremos a cobertura de todas as partes do projeto em PRs pequenos por fluxo, com cenários aprovados e resultados documentados. Durante essa sequência, os testes existentes continuam obrigatórios e as falhas conhecidas devem ser corrigidas. Leia as [regras de testes](docs/regras-de-testes.md) e o [plano de cobertura](docs/cobertura-testes.md#plano-de-ampliação-após-o-pr-47).
 
 ---
 
@@ -162,3 +166,7 @@ O banco e a API continuam rodando depois de fechar o formulário; para derrubá-
 ## Documentação
 
 - [Pitch do projeto](docs/Eng.%20Software%20-%20PITCH.pdf)
+- [Conceitos de testes para a equipe](docs/conceitos-de-testes.md)
+- [Regras de testes e execução da suíte](docs/regras-de-testes.md)
+- [Cobertura atual dos testes](docs/cobertura-testes.md)
+- [Análise do PR #46 e rebase da branch lucas](docs/analise-pr-46.md)

@@ -54,20 +54,14 @@ O dashboard consulta novamente as APIs a cada dez segundos. O estoque suspende e
 
 ## Testes automatizados com banco separado
 
-Não execute os testes no banco de desenvolvimento. O arquivo valida o nome do banco antes de iniciar e remove somente os registros criados pelo teste.
+O executor cria um PostgreSQL temporário exclusivo, aplica as migrations existentes e executa todos os testes de integração. Não use o banco de desenvolvimento nem configure `DATABASE_URL` manualmente. Consulte as [regras de testes](regras-de-testes.md), a [cobertura atual](cobertura-testes.md) e os [bugs reproduzidos](bugs-testes.md).
 
 ```powershell
-docker run --detach --rm --name geroncio-validacao-estoque --publish 127.0.0.1:55432:5432 --env POSTGRES_USER=validacao --env POSTGRES_PASSWORD=validacao_local --env POSTGRES_DB=geroncio_validacao_estoque postgres:16-alpine
-cd C:\gerencio\backend
-$env:DATABASE_URL='postgresql://validacao:validacao_local@127.0.0.1:55432/geroncio_validacao_estoque?connection_limit=5'
-pnpm db:deploy
-pnpm db:generate
-pnpm exec tsx --test testes/pedidos-estoque.test.ts
-docker stop geroncio-validacao-estoque
-Remove-Item Env:DATABASE_URL
+cd C:\gerencio
+pnpm test:integracao
 ```
 
-A porta 55432 e o container acima são exclusivos de validação. No Windows, o uso de `127.0.0.1` também evita a demora observada ao abrir conexões simultâneas por `localhost`.
+Com Docker em execução e dependências do backend instaladas, o comando escolhe uma porta disponível em `127.0.0.1`. O container é removido ao final, inclusive se um teste falhar. O relatório fica em `.resultados-testes/integracao.tap`; uma falha retorna código diferente de zero e deve ser investigada.
 
 Verificações de código:
 

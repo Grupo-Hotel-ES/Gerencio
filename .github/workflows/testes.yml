@@ -1,0 +1,44 @@
+name: Testes de integração
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main, lucas]
+
+permissions:
+  contents: read
+
+jobs:
+  integracao:
+    name: Integração com PostgreSQL real
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - name: Instalar dependências fixadas
+        working-directory: backend
+        run: pnpm install --frozen-lockfile
+      - name: Executar todos os testes de integração
+        run: pnpm test:integracao
+      - name: Verificar tipos
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: |
+          pnpm typecheck
+          pnpm exec tsc --noEmit -p testes/tsconfig.json
+      - name: Guardar relatório, inclusive quando houver falha
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: resultado-integracao
+          path: |
+            .resultados-testes/integracao.tap
+            .resultados-testes/execucao-integracao.json
+          include-hidden-files: true
+          if-no-files-found: warn

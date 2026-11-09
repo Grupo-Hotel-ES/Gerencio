@@ -1,3 +1,4 @@
+import './ambiente'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
@@ -15,7 +16,11 @@ assert.equal(url.pathname, '/geroncio_validacao_estoque', 'Use exclusivamente o 
 test('Pedidos e estoque pelas APIs, com PostgreSQL real', async (t) => {
   const servidores = [pedidos.listen(0, '127.0.0.1'), produtos.listen(0, '127.0.0.1')]
   await Promise.all(servidores.map((servidor) => once(servidor, 'listening')))
-  const [apiPedidos, apiProdutos] = servidores.map((servidor) => `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`)
+  const [enderecoPedidos, enderecoProdutos] = servidores.map((servidor) => `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`)
+  assert.ok(enderecoPedidos, 'A API de pedidos deve estar disponível para os cenários')
+  assert.ok(enderecoProdutos, 'A API de produtos deve estar disponível para os cenários')
+  const apiPedidos = enderecoPedidos
+  const apiProdutos = enderecoProdutos
   const restaurantes: number[] = []
   const eventos: number[] = []
   t.after(async () => {
