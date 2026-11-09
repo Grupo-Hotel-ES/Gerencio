@@ -308,13 +308,22 @@ certbot --nginx -d geroncio.exemplo.com --redirect   # cria o bloco 443 e agenda
 - **Primeiro acesso:** entre com `admin` / `admin123` e **troque a senha** em Perfil. Depois preencha Configurações → Estabelecimento (nome e endereço real, usado no frete e nas rotas) e cadastre a equipe em Usuários e permissões.
 - **Chatbot:** o Ollama precisa de uns 4 a 5 GB de RAM livres. Para ligar, `pnpm chatbot` em `backend/`; o editor do n8n e o QR code da Evolution ficam só em `127.0.0.1`, então acesse por túnel: `ssh -L 8080:localhost:8080 -L 5678:localhost:5678 root@<vps>`.
 
-### Atualizar
+### Atualizar (CI/CD)
+
+Todo push na `develop` dispara `.github/workflows/deploy.yml`: o job **Verificar** roda o typecheck do backend e o lint do frontend (o lint ainda só avisa), e o job **Publicar na VPS** entra por SSH e roda `scripts/deploy.sh`, que faz checkout da `develop`, aplica as migrations, reconstrói os containers, gera o build web, copia para `/var/www/geroncio` e testa o `/health` das APIs. Os arquivos `.env` e o override ficam como estão. Também dá para disparar pela aba Actions (*Run workflow*).
+
+Configuração, feita uma vez:
 
 ```bash
-cd /root/Gerencio && git pull
-cd backend && pnpm install && pnpm db:deploy && docker compose up -d --build
-cd ../frontend && pnpm install && pnpm exec expo export --platform web && rsync -a --delete dist/ /var/www/geroncio/
+# na sua máquina: chave só para o deploy
+ssh-keygen -t ed25519 -N '' -f geroncio_deploy -C github-actions
+ssh-copy-id -i geroncio_deploy.pub root@<vps>
+ssh-keyscan <vps>                     # saída vai no segredo VPS_KNOWN_HOSTS
 ```
+
+No GitHub, em *Settings → Secrets and variables → Actions*, crie `VPS_HOST`, `VPS_USER` (ex.: `root`), `VPS_SSH_KEY` (conteúdo de `geroncio_deploy`) e `VPS_KNOWN_HOSTS`. `VPS_PORT` (padrão 22) e `VPS_DIR` (padrão `/root/Gerencio`) são opcionais. O job usa o environment `producao`, onde dá para exigir aprovação antes de publicar.
+
+Para atualizar à mão na VPS: `bash scripts/deploy.sh` na pasta do repositório.
 
 > **Status:** o frontend está em desenvolvimento e o backend ainda não foi implementado — `backend/` contém apenas a configuração inicial do pacote.
 

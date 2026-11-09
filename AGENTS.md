@@ -174,5 +174,6 @@ Simula o "mundo externo": o formulário web (`mock_frontend`, :3000) monta pedid
 ## Git
 
 - Fluxo: cada integrante trabalha em sua branch (`cahu`, `fraga`, `okita`...), abre PR para `develop`, e `develop` vai para `main`.
+- **Push na `develop` publica o site**: `.github/workflows/deploy.yml` roda o typecheck e então `scripts/deploy.sh` na VPS por SSH (migrations, containers, build web). Ver "Atualizar (CI/CD)" no README.
 - Mensagens de commit curtas, no imperativo (`Add página Relatório`, `Create dashboard page`). Português ou inglês são aceitos; seja consistente dentro de uma mesma PR.
 - Não faça commit, push ou PR sem pedido explícito.
