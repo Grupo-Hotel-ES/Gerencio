@@ -139,6 +139,192 @@ describe('Cadastro de restaurante', () => {
     assert.equal(resposta.dados.error, 'Campos obrigatórios ausentes')
     assert.equal(await db.restaurante.count({ where: { cnpj: entrada.cnpj } }), 0)
   })
+
+  it('quando lista restaurantes, então retorna os estabelecimentos persistidos', async () => {
+    const entrada = dadosRestaurante()
+    const criado = await requisitar(apiRestaurantes, '/api/restaurantes', 'POST', entrada)
+    assert.equal(criado.status, 201)
+
+    const resposta = await requisitar(apiRestaurantes, '/api/restaurantes')
+    assert.equal(resposta.status, 200)
+    assert.ok(Array.isArray(resposta.dados))
+
+    const encontrado = resposta.dados.find((r: any) => r.id === criado.dados.id)
+    assert.ok(encontrado)
+    assert.equal(encontrado.cnpj, entrada.cnpj)
+    assert.equal(encontrado.nome, entrada.nome)
+  })
+
+  it('quando atualiza todos os dados do restaurante via PUT, então substitui os dados antigos e valida erros', async () => {
+    const inicial = dadosRestaurante()
+    const criado = await requisitar(apiRestaurantes, '/api/restaurantes', 'POST', inicial)
+    assert.equal(criado.status, 201)
+    const id = criado.dados.id
+
+    const atualizacao = {
+      cnpj: randomUUID(),
+      nome: 'Restaurante Atualizado Total',
+      email: 'atualizado@example.invalid',
+      telefone: '11988887777',
+      cep: '05000000',
+      cidade: 'Campinas',
+      endereco: 'Avenida Teste, 500',
+      taxaEntregaBase: 12.5,
+      kmInclusosTaxaBase: 3.5,
+      custoPorKmAdicional: 2.5,
+      distanciaMaximaKm: 20,
+      latitude: -23.55052,
+      longitude: -46.633308,
+    }
+
+    const respostaPut = await requisitar(apiRestaurantes, `/api/restaurantes/${id}`, 'PUT', atualizacao)
+    assert.equal(respostaPut.status, 200)
+
+    const noBanco = await db.restaurante.findUnique({ where: { id } })
+    assert.ok(noBanco)
+    assert.equal(noBanco.cnpj, atualizacao.cnpj)
+    assert.equal(noBanco.nome, atualizacao.nome)
+    assert.equal(noBanco.email, atualizacao.email)
+    assert.equal(noBanco.telefone, atualizacao.telefone)
+    assert.equal(noBanco.cep, atualizacao.cep)
+    assert.equal(noBanco.cidade, atualizacao.cidade)
+    assert.equal(noBanco.endereco, atualizacao.endereco)
+    assert.equal(Number(noBanco.taxaEntregaBase), atualizacao.taxaEntregaBase)
+    assert.equal(noBanco.kmInclusosTaxaBase, atualizacao.kmInclusosTaxaBase)
+    assert.equal(Number(noBanco.custoPorKmAdicional), atualizacao.custoPorKmAdicional)
+    assert.equal(noBanco.distanciaMaximaKm, atualizacao.distanciaMaximaKm)
+    assert.equal(noBanco.latitude, atualizacao.latitude)
+    assert.equal(noBanco.longitude, atualizacao.longitude)
+
+    const resposta404 = await requisitar(apiRestaurantes, '/api/restaurantes/99999999', 'PUT', atualizacao)
+    assert.equal(resposta404.status, 404)
+    assert.equal(resposta404.dados.error, 'Restaurante não encontrado')
+
+    const resposta400Id = await requisitar(apiRestaurantes, '/api/restaurantes/invalido', 'PUT', atualizacao)
+    assert.equal(resposta400Id.status, 400)
+    assert.equal(resposta400Id.dados.error, 'Id inválido')
+
+    const resposta400Dado = await requisitar(apiRestaurantes, `/api/restaurantes/${id}`, 'PUT', {
+      ...atualizacao,
+      taxaEntregaBase: -1,
+    })
+    assert.equal(resposta400Dado.status, 400)
+    assert.equal(resposta400Dado.dados.error, 'taxaEntregaBase deve ser um número maior ou igual a zero')
+  })
+
+  it('quando atualiza parcialmente via PATCH, então altera apenas os campos informados sem resetar os demais', async () => {
+    const inicial = dadosRestaurante()
+    const criado = await requisitar(apiRestaurantes, '/api/restaurantes', 'POST', inicial)
+    assert.equal(criado.status, 201)
+    const id = criado.dados.id
+
+    const novoTelefone = '11977776666'
+    const respostaPatch = await requisitar(apiRestaurantes, `/api/restaurantes/${id}`, 'PATCH', { telefone: novoTelefone })
+    assert.equal(respostaPatch.status, 200)
+
+    const noBanco = await db.restaurante.findUnique({ where: { id } })
+    assert.ok(noBanco)
+    assert.equal(noBanco.telefone, novoTelefone)
+    assert.equal(noBanco.nome, inicial.nome)
+    assert.equal(noBanco.cnpj, inicial.cnpj)
+    assert.equal(noBanco.email, inicial.email)
+    assert.equal(noBanco.cidade, inicial.cidade)
+    assert.equal(noBanco.endereco, inicial.endereco)
+    assert.equal(noBanco.cep, inicial.cep)
+
+    const resposta404 = await requisitar(apiRestaurantes, '/api/restaurantes/99999999', 'PATCH', { telefone: novoTelefone })
+    assert.equal(resposta404.status, 404)
+    assert.equal(resposta404.dados.error, 'Restaurante não encontrado')
+
+    const resposta400Id = await requisitar(apiRestaurantes, '/api/restaurantes/invalido', 'PATCH', { telefone: novoTelefone })
+    assert.equal(resposta400Id.status, 400)
+    assert.equal(resposta400Id.dados.error, 'Id inválido')
+
+    const resposta400Entrega = await requisitar(apiRestaurantes, `/api/restaurantes/${id}`, 'PATCH', { custoPorKmAdicional: -10 })
+    assert.equal(resposta400Entrega.status, 400)
+    assert.equal(resposta400Entrega.dados.error, 'custoPorKmAdicional deve ser um número maior ou igual a zero')
+  })
+
+  it('quando deleta o restaurante, então remove o registro e suas credenciais em cascata', async () => {
+    const entrada = dadosRestaurante()
+    const criado = await requisitar(apiRestaurantes, '/api/restaurantes', 'POST', entrada)
+    assert.equal(criado.status, 201)
+    const id = criado.dados.id as number
+
+    const credencial = await db.credencialPlataforma.create({
+      data: {
+        restauranteId: id,
+        plataforma: 'ifood',
+        clientId: 'client_teste_cascade',
+        accessToken: 'access_teste',
+        refreshToken: 'refresh_teste',
+      },
+    })
+    assert.ok(credencial.id)
+    assert.equal(await db.credencialPlataforma.count({ where: { restauranteId: id } }), 1)
+
+    const respostaDelete = await requisitar(apiRestaurantes, `/api/restaurantes/${id}`, 'DELETE')
+    assert.equal(respostaDelete.status, 204)
+    assert.equal(respostaDelete.dados, null)
+
+    assert.equal(await db.restaurante.count({ where: { id } }), 0)
+    assert.equal(await db.credencialPlataforma.count({ where: { restauranteId: id } }), 0)
+
+    const resposta404 = await requisitar(apiRestaurantes, `/api/restaurantes/${id}`, 'DELETE')
+    assert.equal(resposta404.status, 404)
+    assert.equal(resposta404.dados.error, 'Restaurante não encontrado')
+
+    const resposta400 = await requisitar(apiRestaurantes, '/api/restaurantes/invalido', 'DELETE')
+    assert.equal(resposta400.status, 400)
+    assert.equal(resposta400.dados.error, 'Id inválido')
+  })
+
+  it('quando consulta os produtos do restaurante, então retorna apenas o cardápio daquele estabelecimento', async () => {
+    const [resA, resB] = await Promise.all([
+      requisitar(apiRestaurantes, '/api/restaurantes', 'POST', dadosRestaurante()),
+      requisitar(apiRestaurantes, '/api/restaurantes', 'POST', dadosRestaurante()),
+    ])
+    assert.equal(resA.status, 201)
+    assert.equal(resB.status, 201)
+    const idA = resA.dados.id as number
+    const idB = resB.dados.id as number
+
+    const [prodA1, prodA2] = await Promise.all([
+      requisitar(apiProdutos, '/produtos', 'POST', {
+        restauranteId: idA, nome: 'Burger Gourmet A', preco: '32.00', quantidade: 10, categoria: 'Lanches',
+      }),
+      requisitar(apiProdutos, '/produtos', 'POST', {
+        restauranteId: idA, nome: 'Suco Natural A', preco: '9.00', quantidade: 15, categoria: 'Bebidas',
+      }),
+    ])
+    assert.equal(prodA1.status, 201)
+    assert.equal(prodA2.status, 201)
+
+    const prodB = await requisitar(apiProdutos, '/produtos', 'POST', {
+      restauranteId: idB, nome: 'Pizza Especial B', preco: '65.00', quantidade: 5, categoria: 'Pizzas',
+    })
+    assert.equal(prodB.status, 201)
+
+    const consultaA = await requisitar(apiRestaurantes, `/api/restaurantes/${idA}/produtos`)
+    assert.equal(consultaA.status, 200)
+    assert.ok(Array.isArray(consultaA.dados))
+    assert.equal(consultaA.dados.length, 2)
+
+    const idsRetornados = consultaA.dados.map((p: any) => p.id)
+    assert.ok(idsRetornados.includes(prodA1.dados.id))
+    assert.ok(idsRetornados.includes(prodA2.dados.id))
+    assert.ok(!idsRetornados.includes(prodB.dados.id))
+
+    assert.ok(consultaA.dados.every((p: any) => p.restauranteId === idA))
+
+    const resposta404 = await requisitar(apiRestaurantes, '/api/restaurantes/99999999/produtos')
+    assert.equal(resposta404.status, 404)
+    assert.equal(resposta404.dados.error, 'Restaurante não encontrado')
+
+    const resposta400 = await requisitar(apiRestaurantes, '/api/restaurantes/invalido/produtos')
+    assert.equal(resposta400.status, 400)
+    assert.equal(resposta400.dados.error, 'Id inválido')
+  })
 })
 
 describe('Webhook de delivery', () => {

@@ -6,7 +6,7 @@ Comportamentos desta primeira etapa confirmados pelo responsável pelo projeto n
 
 | Fluxo | Risco | Cobertura nesta etapa |
 | --- | --- | --- |
-| Cadastro de restaurante | Dados inválidos ou não persistidos | Cadastro e consulta HTTP; ausência de nome sem gravação |
+| Cadastro de restaurante | Dados inválidos ou não persistidos | Cadastro e consulta HTTP; ausência de nome sem gravação; listagem completa; atualização PUT e PATCH com validação; exclusão com cascade de credenciais; consulta de cardápio isolado |
 | Produtos e pedidos manuais | Preço adulterado, itens inconsistentes, mistura de restaurantes | Suíte existente de pedidos/estoque preservada |
 | Aceite, cancelamento e estoque | Baixa duplicada, saldo negativo, devolução duplicada, gravação parcial | Suíte existente: concorrência de aceites e disputa de saldo, ciclo e ajustes |
 | Entrada de webhooks de delivery | Duplicação e falsificação de eventos | Dois POSTs iFood simultâneos; rejeição de assinatura Rappi inválida |
@@ -40,14 +40,19 @@ Decisão do responsável em 09/11/2026: estabilizar e integrar primeiro o PR #46
 | Autenticação e permissões | Identidades, vínculos e acessos indevidos quando esses controles estiverem implementados e definidos |
 | Fluxos de ponta a ponta | Jornadas prioritárias do usuário após aprovação específica dos cenários e ambiente |
 
-Para cada parte: inventariar o comportamento final, apresentar cenários “quando ..., então ...”, obter a confirmação do responsável, implementar os testes adequados e registrar resultados e lacunas. Entregar em PRs pequenos e revisáveis por fluxo. O número de cenários não substitui essa avaliação de cobertura.
+Para cada parte: inventariar o comportamento final, apresentar cenários "quando ..., então ...", obter a confirmação do responsável, implementar os testes adequados e registrar resultados e lacunas. Entregar em PRs pequenos e revisáveis por fluxo. O número de cenários não substitui essa avaliação de cobertura.
 
-## Dez cenários novos aprovados
+## Quinze cenários aprovados
 
 ```text
 describe "Cadastro de restaurante"
   it "quando os dados obrigatórios são válidos, então cadastra e permite consultar o restaurante"
   it "quando falta o nome, então responde 400 sem gravar"
+  it "quando lista restaurantes, então retorna os estabelecimentos persistidos"
+  it "quando atualiza todos os dados do restaurante via PUT, então substitui os dados antigos e valida erros"
+  it "quando atualiza parcialmente via PATCH, então altera apenas os campos informados sem resetar os demais"
+  it "quando deleta o restaurante, então remove o registro e suas credenciais em cascata"
+  it "quando consulta os produtos do restaurante, então retorna apenas o cardápio daquele estabelecimento"
 
 describe "Webhook de delivery"
   it "quando dois webhooks iFood iguais chegam simultaneamente, então persiste um único evento"
@@ -68,28 +73,13 @@ Os onze cenários em `backend/testes/pedidos-estoque.test.ts` foram mantidos, co
 
 ## Resultado da execução local
 
-- Data: 02/11/2026.
+- Data: 09/11/2026 (merge okita ← develop).
 - Comando: `pnpm test:integracao` na raiz.
-- Ambiente: Node.js 24, PostgreSQL 16 em container temporário e 11 migrations existentes aplicadas no banco de teste vazio.
-- Cenários de comportamento: **20 passaram e 1 falhou**, de 21.
-- O resumo do Node informa **22 testes, 21 aprovados, 1 reprovado**, porque também conta o teste agregador dos onze cenários legados.
+- Ambiente: Node.js 24, PostgreSQL 16 em container temporário e 12 migrations existentes aplicadas no banco de teste vazio.
+- Cenários de comportamento: **26 passaram e 0 falharam** (BUG-TESTE-001 corrigido pela develop).
+- O resumo do Node informa **27 testes, 27 aprovados, 0 reprovados**, incluindo o teste agregador dos onze cenários legados.
 - Ignorados, pendentes e cancelados: **zero**.
 - `pnpm typecheck` no backend: passou.
 - `pnpm exec tsc --noEmit -p testes/tsconfig.json`: passou.
-- Bug reproduzido: **BUG-TESTE-001**, descrito em `bugs-testes.md`.
 
-O comando retorna código 1 enquanto esse bug existir. O relatório TAP detalhado fica em `.resultados-testes/integracao.tap` e é recriado a cada execução. A execução remota do GitHub Actions só ocorrerá após enviar o commit; não está validada por esta execução local.
-
-## Revalidação após o rebase em 09/11/2026
-
-A revisão `42ed2c9` da `lucas`, baseada na develop `609a74a`, executou a suíte completa com PostgreSQL 16 em container exclusivo do Docker. Foram aplicadas as 11 migrations existentes, e o container foi removido ao final.
-
-O resultado confirmou **20 cenários aprovados e 1 reprovado**, sem ignorados, pendentes ou cancelados. O Node incluiu o agregador legado no resumo: 22 testes, 21 aprovados e 1 reprovado. A única falha foi o BUG-TESTE-001, sobre a falha Stripe atrasada, com `falhou !== pago`.
-
-O pnpm parou antes da execução por exigir confirmação interativa ao recriar o `node_modules` da raiz. O mesmo executor foi chamado diretamente com `node scripts/testar-integracao.mjs`, sem filtros nem alteração da suíte. Veja ambiente, comandos e evidências na [análise do PR #46](analise-pr-46.md#nova-execução-após-disponibilizar-o-docker).
-
-## Resultado após as correções em 09/11/2026
-
-Depois de corrigir o BUG-TESTE-001, incluir todos os testes na checagem de tipos e ajustar os relatórios, a suíte completa passou: **21 cenários de comportamento aprovados**, correspondendo a 22 testes no resumo do Node com o agregador legado. Zero falhas, ignorados, pendentes e cancelados. As asserções de negócio existentes foram preservadas. O PostgreSQL temporário foi removido ao final.
-
-Comando local: `pnpm --config.verify-deps-before-run=false test:integracao`, com dependências do backend previamente instaladas. Também passaram `pnpm typecheck` e `pnpm exec tsc --noEmit -p testes/tsconfig.json` no backend. Uma falha controlada de preparação confirmou que não há reutilização do TAP anterior. O registro JSON identifica a revisão-base e as alterações locais dessa validação; o CI deve confirmar a revisão publicada.
+O comando retorna código 0 após a correção do BUG-TESTE-001 integrada pela develop. O relatório TAP detalhado fica em `.resultados-testes/integracao.tap` e é recriado a cada execução.

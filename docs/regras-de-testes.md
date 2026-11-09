@@ -48,7 +48,7 @@ Código de saída `0` significa sucesso; qualquer falha de preparação, teste o
 
 ## Comportamentos antes da implementação
 
-- Antes de escrever um teste de negócio novo, apresentar ao responsável as frases `describe` / `it` em português, com a forma **“quando ..., então ...”**.
+- Antes de escrever um teste de negócio novo, apresentar ao responsável as frases `describe` / `it` em português, com a forma **"quando ..., então ..."**.
 - Esperar confirmação ou correção. O comportamento existente no código não é automaticamente o comportamento correto.
 - Registrar a aprovação e as decisões relevantes no documento de cobertura. Se houver dúvida durante a implementação, interromper o cenário afetado e perguntar.
 - Considerar, para cada fluxo, caminho feliz, erros esperados, repetição, concorrência, limites e acesso indevido. Registrar explicitamente o que ainda não possui contrato aprovado ou implementação.
@@ -92,10 +92,10 @@ O verificador de marcações do executor é uma proteção adicional e não subs
 
 - Após alterações no backend: executar `pnpm test:integracao` na raiz e `pnpm typecheck` no backend. Para os testes novos: `pnpm exec tsc --noEmit -p testes/tsconfig.json` no backend.
 - Após alterações no frontend: executar também `pnpm lint` no frontend e as verificações aplicáveis à mudança.
-- Informar comando, revisão analisada, resultado e limitações. Distinguir “passou”, “falhou” e “não executado”.
+- Informar comando, revisão analisada, resultado e limitações. Distinguir "passou", "falhou" e "não executado".
 - Nunca anunciar tudo verde quando existe teste falhando ou quando o ambiente impediu sua execução.
 - Em uma entrega de diagnóstico, é permitido registrar o commit na branch de trabalho com o teste reproduzindo o bug e o relatório explícito. Isso não autoriza integrar uma regressão à `develop`.
-- Antes de integrar uma PR, revisar mudanças nos testes e exigir a verificação **“Integração com PostgreSQL real”** aprovada.
+- Antes de integrar uma PR, revisar mudanças nos testes e exigir a verificação **"Integração com PostgreSQL real"** aprovada.
 
 O workflow `.github/workflows/testes.yml` executa os testes em PRs e em pushes de `lucas`, `develop` e `main`, além de guardar o relatório. Não utiliza `continue-on-error`. O administrador do repositório precisa tornar essa verificação obrigatória nas regras de proteção de `develop`/`main`: o arquivo do workflow, sozinho, não impede um merge manual. Essa configuração remota não foi alterada nesta entrega.
 
