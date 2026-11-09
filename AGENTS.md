@@ -55,6 +55,8 @@ Dentro de `frontend/`: `pnpm web`, `pnpm android`, `pnpm ios`, `pnpm lint`.
 
 ### Regras obrigatórias de testes
 
+- Política acordada em 09/11/2026: concluir a base de regressão e as correções do PR #46, integrar as rotas do PR #47 e então ampliar a cobertura para todas as partes do projeto, em PRs pequenos por fluxo. Consulte o plano em [docs/cobertura-testes.md](docs/cobertura-testes.md#plano-de-ampliação-após-o-pr-47).
+- Durante essa sequência, preservar a suíte existente e adicionar regressões necessárias às correções. A ampliação planejada não dispensa corrigir falhas conhecidas ou executar os checks antes de integrar.
 - Leia [docs/regras-de-testes.md](docs/regras-de-testes.md) antes de criar ou alterar testes. Use `node:test`, `assert` e `tsx`, já presentes no projeto.
 - Apresente as frases `describe` / `it` em português (“quando ..., então ...”) e espere a confirmação do responsável antes de implementar comportamentos novos.
 - Não apague, pule (`skip`, `todo`, `only`) ou afrouxe testes/asserções para obter aprovação. Se um teste parecer errado, pare e pergunte.

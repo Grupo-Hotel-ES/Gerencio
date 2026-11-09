@@ -22,6 +22,26 @@ Comportamentos desta primeira etapa confirmados pelo responsável pelo projeto n
 
 Esta entrega é uma base simples de regressão, não cobertura integral dos fluxos críticos. As decisões de permissões, escopo dos códigos de plataforma, relatórios e exclusão de clientes continuam dependendo da confirmação do responsável.
 
+## Plano de ampliação após o PR #47
+
+Decisão do responsável em 09/11/2026: estabilizar e integrar primeiro o PR #46; em seguida integrar o PR #47; depois ampliar os testes para todas as partes do projeto. A suíte atual deve continuar executando durante essa sequência. Os itens abaixo são um plano, não cobertura já entregue nem aprovação antecipada de cada comportamento.
+
+| Parte | Cobertura a planejar após o PR #47 |
+| --- | --- |
+| Restaurantes, clientes e funcionários | CRUD, validações, vínculos, isolamento entre restaurantes e efeitos de exclusões |
+| Produtos, estoque e pedidos | Complementar as regressões existentes com limites, falhas, transações e transições de status |
+| Frete e rotas | Cálculo, seleção/ordem das paradas, exportação, limites e efeitos nos pedidos, conforme o contrato final do PR #47 |
+| Pagamentos e assinaturas | Emissão/reutilização de links, consulta, falhas externas e eventos conflitantes; acesso por assinatura quando houver modelo e regra aprovados |
+| Plataformas de delivery | Assinaturas, recebimento durável, conversão, mapeamento, reprocessamento e processamento completo |
+| Relatórios | Filtros, períodos, agregações e valores financeiros |
+| Frontend | Estados de carregamento/erro/vazio, formulários, interações, acessibilidade, responsividade e integração com APIs |
+| Chatbot/WhatsApp | Sessões, debounce, confirmação, consulta e limites, com serviços externos controlados |
+| Mock das plataformas | Contratos dos payloads, persistência própria e comunicação com o backend |
+| Autenticação e permissões | Identidades, vínculos e acessos indevidos quando esses controles estiverem implementados e definidos |
+| Fluxos de ponta a ponta | Jornadas prioritárias do usuário após aprovação específica dos cenários e ambiente |
+
+Para cada parte: inventariar o comportamento final, apresentar cenários “quando ..., então ...”, obter a confirmação do responsável, implementar os testes adequados e registrar resultados e lacunas. Entregar em PRs pequenos e revisáveis por fluxo. O número de cenários não substitui essa avaliação de cobertura.
+
 ## Dez cenários novos aprovados
 
 ```text
@@ -44,7 +64,7 @@ describe "Pagamento de pedido"
 
 Implementação: `backend/testes/fluxos-criticos.test.ts`. As pré-condições são cadastradas pelas APIs de restaurantes, produtos e pedidos; o registro de um link pendente é uma fixture Prisma. Nenhum pagamento real é feito. Os testes não exercitam o envio de WhatsApp, pois os pedidos usados são de balcão.
 
-Os onze cenários em `backend/testes/pedidos-estoque.test.ts` foram mantidos, com todas as asserções originais. A única alteração nesse arquivo foi acrescentar a validação de ambiente antes das importações dos serviços. O cenário legado que usa um adapter simulado continua identificado como cobertura parcial, não como request spec completo.
+Os onze cenários em `backend/testes/pedidos-estoque.test.ts` foram mantidos, com todas as asserções de negócio originais. Foram acrescentadas a validação de ambiente antes das importações e as verificações de disponibilidade das URLs das APIs para a checagem de tipos. O cenário legado que usa um adapter simulado continua identificado como cobertura parcial, não como request spec completo.
 
 ## Resultado da execução local
 
@@ -59,3 +79,17 @@ Os onze cenários em `backend/testes/pedidos-estoque.test.ts` foram mantidos, co
 - Bug reproduzido: **BUG-TESTE-001**, descrito em `bugs-testes.md`.
 
 O comando retorna código 1 enquanto esse bug existir. O relatório TAP detalhado fica em `.resultados-testes/integracao.tap` e é recriado a cada execução. A execução remota do GitHub Actions só ocorrerá após enviar o commit; não está validada por esta execução local.
+
+## Revalidação após o rebase em 09/11/2026
+
+A revisão `42ed2c9` da `lucas`, baseada na develop `609a74a`, executou a suíte completa com PostgreSQL 16 em container exclusivo do Docker. Foram aplicadas as 11 migrations existentes, e o container foi removido ao final.
+
+O resultado confirmou **20 cenários aprovados e 1 reprovado**, sem ignorados, pendentes ou cancelados. O Node incluiu o agregador legado no resumo: 22 testes, 21 aprovados e 1 reprovado. A única falha foi o BUG-TESTE-001, sobre a falha Stripe atrasada, com `falhou !== pago`.
+
+O pnpm parou antes da execução por exigir confirmação interativa ao recriar o `node_modules` da raiz. O mesmo executor foi chamado diretamente com `node scripts/testar-integracao.mjs`, sem filtros nem alteração da suíte. Veja ambiente, comandos e evidências na [análise do PR #46](analise-pr-46.md#nova-execução-após-disponibilizar-o-docker).
+
+## Resultado após as correções em 09/11/2026
+
+Depois de corrigir o BUG-TESTE-001, incluir todos os testes na checagem de tipos e ajustar os relatórios, a suíte completa passou: **21 cenários de comportamento aprovados**, correspondendo a 22 testes no resumo do Node com o agregador legado. Zero falhas, ignorados, pendentes e cancelados. As asserções de negócio existentes foram preservadas. O PostgreSQL temporário foi removido ao final.
+
+Comando local: `pnpm --config.verify-deps-before-run=false test:integracao`, com dependências do backend previamente instaladas. Também passaram `pnpm typecheck` e `pnpm exec tsc --noEmit -p testes/tsconfig.json` no backend. Uma falha controlada de preparação confirmou que não há reutilização do TAP anterior. O registro JSON identifica a revisão-base e as alterações locais dessa validação; o CI deve confirmar a revisão publicada.
