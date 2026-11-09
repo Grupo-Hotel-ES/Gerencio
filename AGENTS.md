@@ -182,6 +182,7 @@ Simula o "mundo externo": o formulário web (`mock_frontend`, :3000) monta pedid
 - Os protótipos de cada tela (web e mobile) estão em `src/design-system/prototypes/` — use-os como referência visual ao implementar uma página.
 - Chamadas HTTP em `src/services/api-*.ts`. A URL base vem de `EXPO_PUBLIC_API_*_URL` com fallback para `localhost`. Cada serviço converte o formato da API para o tipo da UI (em `src/data/`).
 - O layout é responsivo: com largura ≥ 960 aparece a sidebar; abaixo disso, a navegação compacta.
+- **Relatório em PDF**: o botão "Exportar PDF" de `relatorios` monta um HTML (`data/relatorio-html.ts`) e chama `exportarPdf` (`services/exportar-pdf.ts`). No app, abre a impressão do sistema com `expo-print`, onde se salva ou compartilha o PDF. Na web (`exportar-pdf.web.ts`), imprime um iframe só com o relatório, porque o `expo-print` na web imprime a página inteira; o usuário escolhe "Salvar como PDF". O `expo-sharing` ficou de fora: a versão do SDK 57 depende de um pacote barrado pelo `minimumReleaseAge` do pnpm.
 - Estilo de código: aspas simples, com ponto e vírgula, `StyleSheet.create` no fim do arquivo.
 
 ## Git
