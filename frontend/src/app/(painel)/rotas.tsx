@@ -151,7 +151,7 @@ export default function PlanejarRota() {
           />
         </View>
         <View style={duasColunas ? styles.direita : styles.coluna}>
-          <RotaMapa rota={rotaAtual} calculando={calculando} altura={duasColunas ? 460 : 340} />
+          <RotaMapa rota={rotaAtual} paradas={paradas} calculando={calculando} altura={duasColunas ? 460 : 340} />
           <RotaResumo
             partida={partida}
             paradas={paradas}
