@@ -1,6 +1,8 @@
 // api-restaurantes/src/server.ts
 import express, { type ErrorRequestHandler } from 'express'
+import { exigirLoginPublico } from '@geroncio/shared-db'
 import routes from './routes'
+import conta from './conta'
 
 const app = express()
 
@@ -25,8 +27,12 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', service: 'api-restaurantes' })
 })
 
+// Login: obrigatório para quem chega pela internet (nginx); chamadas internas passam direto
+app.use(exigirLoginPublico({ livres: ['/api/auth/login', '/api/restaurante/marca'] }))
+
 // Rotas
 app.use('/api', routes)
+app.use('/api', conta)
 
 // Rota não encontrada
 app.use((req, res) => {

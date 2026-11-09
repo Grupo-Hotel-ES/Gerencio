@@ -19,7 +19,7 @@ O Gerôncio centraliza pedidos de várias plataformas de delivery (iFood, Rappi,
 ├── backend/          # Microsserviços Express + Prisma (pnpm workspace)
 │   ├── api-clientes/       # :3001  CRUD de clientes
 │   ├── api-pedidos/        # :3002  pedidos, status, entregador, relatório de vendas, frete e rotas de entrega
-│   ├── api-restaurantes/   # :3003  CRUD de restaurantes
+│   ├── api-restaurantes/   # :3003  restaurante (único), login e usuários
 │   ├── api-produtos/       # :3004  produtos e mapeamentos produto ↔ id externo da plataforma
 │   ├── api-integracao/     # :3005  webhooks/polling das plataformas de delivery
 │   ├── api-pagamentos/     # :3006  Stripe Checkout: assinatura do Gerêncio e links de pagamento de pedidos
@@ -103,6 +103,16 @@ routes.get('/pedidos/:id', async (req, res) => {
 - Valores de enum validados contra `Object.values(StatusPedido)` etc.
 - Estilo de código: aspas simples, sem ponto e vírgula, 2 espaços.
 
+### Restaurante único e login
+
+O app é **whitelabel**: atende um restaurante só. A tabela `Restaurante` continua (produtos, pedidos e frete apontam para ela), mas há sempre exatamente um registro, garantido pela migration e por `obterRestaurantePrincipal()` (`shared-db/src/restaurante.ts`). Onde as APIs recebiam `restauranteId`, ele virou opcional (`resolverRestauranteId`); o frontend não envia mais.
+
+- **Login** (`api-restaurantes/src/conta.ts`): `POST /api/auth/login` devolve um token assinado com `AUTH_SECRET` (HMAC, 7 dias; `shared-db/src/auth.ts`). Sem nenhum usuário, a api-restaurantes cria `admin` / `admin123` ao subir. Senhas com scrypt.
+- **Papéis** (`PapelUsuario`): `administrador` (tudo, inclusive usuários), `gerente` (edita restaurante e preferências), `operador` (opera pedidos e estoque).
+- **Rotas**: `GET/PATCH /api/restaurante` (dados, endereço, regras de entrega e `configuracoes` — JSON com `operacao` e `preferencias`, mesclado por seção), `GET /api/restaurante/marca` (público, nome para o login), `/api/usuarios` (CRUD, só administrador), `PATCH /api/usuarios/eu` e `POST /api/usuarios/eu/senha`.
+- **Proteção**: `exigirLoginPublico()` em cada `server.ts` exige o token apenas em requisições com o cabeçalho `X-Geroncio-Publico`, que o nginx adiciona. Chamadas internas (chatbot no compose) e o desenvolvimento local passam direto. Caminhos livres: `/health`, login, marca, webhook do Stripe e página de retorno do pagamento. As rotas de usuários e do restaurante sempre exigem token.
+- **Frontend**: `SessaoProvider` (`data/sessao.tsx`) guarda o token (localStorage na web, `expo-secure-store` no app) e o `http.ts` o envia em toda requisição; 401 volta para o login. O layout `(painel)` redireciona para `/login` sem sessão. `PerfilProvider` carrega o restaurante e combina com o usuário.
+
 ### Banco de dados (`packages/shared-db`)
 
 - Prisma 5.22, PostgreSQL (imagem PostGIS). Importe sempre de `@geroncio/shared-db`: `import { db, parseId, StatusPedido } from '@geroncio/shared-db'`. Não instancie `PrismaClient` nos serviços.
@@ -176,5 +186,6 @@ Simula o "mundo externo": o formulário web (`mock_frontend`, :3000) monta pedid
 ## Git
 
 - Fluxo: cada integrante trabalha em sua branch (`cahu`, `fraga`, `okita`...), abre PR para `develop`, e `develop` vai para `main`.
+- **Push na `develop` publica o site**: `.github/workflows/deploy.yml` roda os testes de integração e o typecheck e então `scripts/deploy.sh` na VPS por SSH (migrations, containers, build web). Ver "Atualizar (CI/CD)" no README.
 - Mensagens de commit curtas, no imperativo (`Add página Relatório`, `Create dashboard page`). Português ou inglês são aceitos; seja consistente dentro de uma mesma PR.
 - Não faça commit, push ou PR sem pedido explícito.

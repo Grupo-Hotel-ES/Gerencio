@@ -3,7 +3,7 @@ import { StyleSheet, TextInput, View } from 'react-native';
 
 import { FormularioEdicaoProduto } from '@/components/dashboard/editar-produto';
 import { FormularioProduto } from '@/components/dashboard/novo-produto';
-import { Campo, SeletorRestaurante } from '@/components/dashboard/formularios';
+import { Campo } from '@/components/dashboard/formularios';
 import { CartaoResumo, Grade, Pagina, useLarguraConteudo } from '@/components/dashboard/pagina';
 import { Aviso, Botao, Cartao, Chip, Divisor, Etiqueta, Texto } from '@/components/dashboard/ui';
 import { Espacamento, Raio } from '@/constants/tokens';
@@ -11,7 +11,7 @@ import { PLATAFORMAS_DELIVERY } from '@/data/estoque';
 import { formatarHora, formatarReais } from '@/data/pedidos';
 import { useCores } from '@/hooks/use-cores';
 import {
-  listarMapeamentos, listarProdutos, listarRestaurantes, salvarEstoque, type Mapeamento, type Produto, type Restaurante,
+  listarMapeamentos, listarProdutos, salvarEstoque, type Mapeamento, type Produto,
 } from '@/services/api-produtos';
 
 type Filtro = 'todos' | 'disponiveis' | 'esgotados';
@@ -32,37 +32,24 @@ export default function GestaoDeEstoque() {
   const [produtos, setProdutos] = useState<Produto[] | null>(null);
   const [mapeamentos, setMapeamentos] = useState<Mapeamento[]>([]);
   const [editando, setEditando] = useState<number | null>(null);
-  const [restaurantes, setRestaurantes] = useState<Restaurante[]>([]);
-  const [restauranteId, setRestauranteId] = useState<number>();
   const [rascunhos, setRascunhos] = useState<Record<number, Rascunho>>({});
   const [filtro, setFiltro] = useState<Filtro>('todos');
   const [busca, setBusca] = useState('');
   const [novoProduto, setNovoProduto] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [erroRestaurantes, setErroRestaurantes] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [atualizadoEm, setAtualizadoEm] = useState<Date | null>(null);
   const consulta = useRef(0);
   const enviando = useRef(false);
 
-  useEffect(() => {
-    let ativo = true;
-    const atualizar = () => listarRestaurantes().then((dados) => {
-      if (ativo) { setRestaurantes(dados); setErroRestaurantes(null); }
-    }).catch((e: Error) => { if (ativo) setErroRestaurantes(e.message); });
-    atualizar();
-    const intervalo = setInterval(atualizar, 10_000);
-    return () => { ativo = false; clearInterval(intervalo); };
-  }, []);
-
   const carregar = useCallback(async () => {
     const versao = ++consulta.current;
     try {
-      const [dados, codigos] = await Promise.all([listarProdutos(restauranteId), listarMapeamentos(restauranteId)]);
+      const [dados, codigos] = await Promise.all([listarProdutos(), listarMapeamentos()]);
       if (versao !== consulta.current) return;
       setProdutos(dados); setMapeamentos(codigos); setAtualizadoEm(new Date()); setErro(null);
     } catch (e) { if (versao === consulta.current) setErro((e as Error).message); }
-  }, [restauranteId]);
+  }, []);
 
   const pendentes = Object.keys(rascunhos).length;
   useEffect(() => {
@@ -111,26 +98,19 @@ export default function GestaoDeEstoque() {
 
   return (
     <Pagina titulo="Gestão de estoque" subtitulo="Consulte o saldo real e ajuste as unidades disponíveis para venda."
-      acao={<Botao rotulo="Cadastrar produto" icone="mais" variante="primario" disabled={!restaurantes.length || salvando || pendentes > 0} onPress={() => setNovoProduto(true)} />}>
-      <SeletorRestaurante restaurantes={restaurantes} valor={restauranteId} onChange={(id) => {
-        consulta.current += 1; setProdutos(null); setAtualizadoEm(null); setEditando(null); setRestauranteId(id);
-      }} todos desabilitado={pendentes > 0 || salvando || novoProduto} />
-      {erroRestaurantes && <Texto cor="feedbackErro" accessibilityRole="alert">Restaurantes: {erroRestaurantes}</Texto>}
-      {!erroRestaurantes && restaurantes.length === 0 && <Texto cor="textoSecundario">É necessário cadastrar um restaurante antes de criar produtos.</Texto>}
-      {novoProduto && <FormularioProduto restaurantes={restaurantes} restauranteInicial={restauranteId}
-        onFechar={() => setNovoProduto(false)} onConcluir={(id, produtoId) => {
+      acao={<Botao rotulo="Cadastrar produto" icone="mais" variante="primario" disabled={salvando || pendentes > 0} onPress={() => setNovoProduto(true)} />}>
+      {novoProduto && <FormularioProduto
+        onFechar={() => setNovoProduto(false)} onConcluir={(produtoId) => {
           // Abre a edição do produto novo para cadastrar os códigos nas plataformas.
           setNovoProduto(false); setFiltro('todos'); setBusca(''); setEditando(produtoId);
-          if (restauranteId !== undefined && restauranteId !== id) {
-            consulta.current += 1; setProdutos(null); setAtualizadoEm(null); setRestauranteId(id);
-          } else carregar();
+          carregar();
         }} />}
       <Grade colunas={largura >= 900 ? 3 : 1}>
         <CartaoResumo rotulo="Produtos cadastrados" valor={produtos ? lista.length : '—'} detalhe="Catálogo salvo no Gerôncio" />
         <CartaoResumo rotulo="Disponíveis" valor={produtos ? disponiveis : '—'} detalhe={contagem.esgotados + ' produtos com saldo zero'} />
         <CartaoResumo rotulo="Ajustes pendentes" valor={pendentes} detalhe="Alterações ainda não salvas" />
       </Grade>
-      {pendentes > 0 && <Aviso icone="salvar" titulo="Há ajustes para salvar" texto="Os pedidos usam o último saldo salvo. Salve seus ajustes antes de trocar de página ou restaurante." />}
+      {pendentes > 0 && <Aviso icone="salvar" titulo="Há ajustes para salvar" texto="Os pedidos usam o último saldo salvo. Salve seus ajustes antes de trocar de página." />}
       {erro && <Cartao><Texto cor="feedbackErro" accessibilityRole="alert">{erro}</Texto></Cartao>}
       <Cartao style={styles.bloco}>
         <View style={styles.linha}>
@@ -153,7 +133,6 @@ export default function GestaoDeEstoque() {
               <View style={styles.produto}>
                 <Texto tamanho={16} peso={600}>{p.nome}</Texto>
                 <Texto cor="textoSecundario">{p.categoria} • {formatarReais(p.preco)}</Texto>
-                <Texto cor="textoSecundario">{p.restaurante?.nome}</Texto>
                 <Texto cor="textoSecundario">Salvo: {p.quantidade} un.{rascunho ? ' • Ajuste pendente' : ''}</Texto>
                 <Texto cor="textoSecundario">{comCodigo.length ? 'Código em: ' + comCodigo.join(', ') : 'Sem código nas plataformas de delivery'}</Texto>
               </View>

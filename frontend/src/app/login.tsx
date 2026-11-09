@@ -1,19 +1,43 @@
-import { Link, router } from 'expo-router';
-import { useState } from 'react';
+import { Redirect, router } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { AuthLayout } from '@/components/auth/auth-layout';
 import { Aviso, Botao, Divisor, Texto } from '@/components/dashboard/ui';
 import { Fonts } from '@/constants/theme';
 import { Espacamento, Raio } from '@/constants/tokens';
+import { useSessao } from '@/data/sessao';
 import { useCores } from '@/hooks/use-cores';
+import { buscarMarca } from '@/services/api-conta';
 
 export default function Login() {
   const cores = useCores();
-  const [email, setEmail] = useState('marina@vilabistro.com.br');
-  const [senha, setSenha] = useState('••••••••••••');
+  const { carregando, usuario, entrar } = useSessao();
+  const [login, setLogin] = useState('');
+  const [senha, setSenha] = useState('');
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [lembrar, setLembrar] = useState(true);
+  const [entrando, setEntrando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [nomeRestaurante, setNomeRestaurante] = useState<string | null>(null);
+
+  useEffect(() => {
+    buscarMarca().then((marca) => setNomeRestaurante(marca.nome)).catch(() => {});
+  }, []);
+
+  if (!carregando && usuario) return <Redirect href="/" />;
+
+  const enviar = async () => {
+    if (!login.trim() || !senha) { setErro('Informe usuário e senha.'); return; }
+    setEntrando(true); setErro(null);
+    try {
+      await entrar(login.trim(), senha, lembrar);
+      router.replace('/');
+    } catch (e) {
+      setErro((e as Error).message);
+      setEntrando(false);
+    }
+  };
 
   const estiloInput = [
     styles.input,
@@ -27,20 +51,25 @@ export default function Login() {
           Bom ter você de volta
         </Texto>
         <Texto tamanho={16} cor="textoSecundario">
-          Entre para acompanhar o Vila Bistrô.
+          {nomeRestaurante ? `Entre para acompanhar o ${nomeRestaurante}.` : 'Entre para acompanhar o seu restaurante.'}
         </Texto>
       </View>
 
       <View style={styles.formulario}>
         <View style={styles.campo}>
           <Texto tamanho={13} peso={500} style={styles.label}>
-            E-mail
+            Usuário
           </Texto>
           <TextInput
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
+            accessibilityLabel="Usuário"
+            value={login}
+            onChangeText={setLogin}
             autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="username"
+            placeholder="seu.usuario"
+            placeholderTextColor={cores.textoSecundario}
+            editable={!entrando}
             style={estiloInput}
           />
         </View>
@@ -51,9 +80,13 @@ export default function Login() {
           </Texto>
           <View style={styles.inputSenhaContainer}>
             <TextInput
+              accessibilityLabel="Senha"
               value={senha}
               onChangeText={setSenha}
               secureTextEntry={!mostrarSenha}
+              autoComplete="current-password"
+              editable={!entrando}
+              onSubmitEditing={enviar}
               style={[estiloInput, styles.inputSenha]}
             />
             <Pressable
@@ -83,44 +116,28 @@ export default function Login() {
             </Texto>
           </Pressable>
 
-          <Link href="/recuperar-senha" asChild>
-            <Pressable>
-              <Texto tamanho={13} peso={600} cor="brand">
-                Esqueci minha senha
-              </Texto>
-            </Pressable>
-          </Link>
         </View>
 
+        {erro && <Texto cor="feedbackErro" accessibilityRole="alert">{erro}</Texto>}
+
         <Botao
-          rotulo="Entrar"
+          rotulo={entrando ? 'Entrando…' : 'Entrar'}
           variante="primario"
-          onPress={() => router.replace('/')}
+          disabled={entrando || carregando}
+          onPress={enviar}
         />
 
         <Aviso
           icone="escudo"
           titulo="Seu acesso é pessoal"
-          texto="Não compartilhe sua senha. Convide sua equipe em Usuários e permissões."
+          texto="Não compartilhe sua senha. O administrador cadastra a equipe em Configurações > Usuários e permissões."
         />
 
         <Divisor />
 
-        <View style={styles.secaoCadastro}>
-          <Texto tamanho={14} peso={500}>
-            Ainda não tem uma conta?
-          </Texto>
-          <Link href="/cadastro" asChild>
-            <Botao rotulo="Cadastrar meu estabelecimento" />
-          </Link>
-        </View>
-
         <View style={styles.rodape}>
           <Texto tamanho={13} cor="textoSecundario">
-            Precisa de ajuda? Fale com o suporte.
-          </Texto>
-          <Texto tamanho={13} cor="textoSecundario">
-            Privacidade • Termos de uso
+            Esqueceu a senha? Peça ao administrador para definir uma nova.
           </Texto>
         </View>
       </View>
@@ -181,9 +198,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  secaoCadastro: {
-    gap: Espacamento.medium,
   },
   rodape: {
     gap: Espacamento.xsmall,

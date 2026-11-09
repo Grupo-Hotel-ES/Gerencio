@@ -3,7 +3,6 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { OrderCard } from '@/components/dashboard/order-card';
 import { FormularioPedido } from '@/components/dashboard/novo-pedido';
-import { SeletorRestaurante } from '@/components/dashboard/formularios';
 import { CartaoResumo, Grade, Pagina, useLarguraConteudo } from '@/components/dashboard/pagina';
 import { Botao, Cartao, Chip, Icone, Texto } from '@/components/dashboard/ui';
 import { Fonts } from '@/constants/theme';
@@ -19,7 +18,6 @@ import {
 import { useCores } from '@/hooks/use-cores';
 import { buscarConfigPagamento } from '@/services/api-pagamentos';
 import { atualizarStatus, listarPedidosAtivos } from '@/services/api-pedidos';
-import { listarRestaurantes, type Restaurante } from '@/services/api-produtos';
 
 type Filtro = 'todos' | StatusAtivo;
 
@@ -46,24 +44,11 @@ export default function DashboardDePedidos() {
   const [menuCanais, setMenuCanais] = useState(false);
   const [buscando, setBuscando] = useState(false);
   const [busca, setBusca] = useState('');
-  const [restaurantes, setRestaurantes] = useState<Restaurante[]>([]);
-  const [erroRestaurantes, setErroRestaurantes] = useState<string | null>(null);
-  const [restauranteId, setRestauranteId] = useState<number>();
   const [novoPedido, setNovoPedido] = useState(false);
   const [ocupados, setOcupados] = useState<number[]>([]);
   const [pagamentoOnline, setPagamentoOnline] = useState(false);
   const operacoes = useRef(new Set<number>());
   const consulta = useRef(0);
-
-  useEffect(() => {
-    let ativo = true;
-    const atualizar = () => listarRestaurantes().then((dados) => {
-      if (ativo) { setRestaurantes(dados); setErroRestaurantes(null); }
-    }).catch((e: Error) => { if (ativo) setErroRestaurantes(e.message); });
-    atualizar();
-    const intervalo = setInterval(atualizar, INTERVALO_ATUALIZACAO_MS);
-    return () => { ativo = false; clearInterval(intervalo); };
-  }, []);
 
   // Só oferece link de pagamento quando o Stripe está configurado na api-pagamentos.
   // Confere de novo a cada atualização: a API pode subir (ou ganhar as chaves) com o painel aberto.
@@ -80,7 +65,7 @@ export default function DashboardDePedidos() {
   const carregar = useCallback(async () => {
     const versao = ++consulta.current;
     try {
-      const dados = await listarPedidosAtivos(restauranteId);
+      const dados = await listarPedidosAtivos();
       if (versao !== consulta.current) return;
       setAtivos(dados);
       setAtualizadoEm(new Date());
@@ -88,7 +73,7 @@ export default function DashboardDePedidos() {
     } catch (e) {
       if (versao === consulta.current) setErro((e as Error).message);
     }
-  }, [restauranteId]);
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- carregar atualiza o estado somente após a resposta HTTP.
@@ -144,18 +129,11 @@ export default function DashboardDePedidos() {
     <Pagina
       titulo="Dashboard de pedidos"
       subtitulo="Acompanhe a cozinha e as entregas, sem trocar de aplicativo."
-      acao={<Botao rotulo="Novo pedido" icone="mais" variante="primario" disabled={restaurantes.length === 0} onPress={() => setNovoPedido(true)} />}>
-      <SeletorRestaurante restaurantes={restaurantes} valor={restauranteId} onChange={(id) => {
-        consulta.current += 1; setAtivos(null); setAtualizadoEm(null); setRestauranteId(id);
-      }} todos desabilitado={ocupados.length > 0} />
-      {erroRestaurantes && <Texto cor="feedbackErro" accessibilityRole="alert">Restaurantes: {erroRestaurantes}</Texto>}
-      {restaurantes.length === 0 && <Texto cor="textoSecundario">Para cadastrar pedidos, é necessário ter um restaurante cadastrado e a API de restaurantes disponível.</Texto>}
-      {novoPedido && <FormularioPedido restaurantes={restaurantes} restauranteInicial={restauranteId}
-        onFechar={() => setNovoPedido(false)} onConcluir={(id) => {
+      acao={<Botao rotulo="Novo pedido" icone="mais" variante="primario" onPress={() => setNovoPedido(true)} />}>
+      {novoPedido && <FormularioPedido
+        onFechar={() => setNovoPedido(false)} onConcluir={() => {
           setNovoPedido(false); setFiltro('todos'); setCanal(null); setBusca('');
-          if (restauranteId !== undefined && restauranteId !== id) {
-            consulta.current += 1; setAtivos(null); setAtualizadoEm(null); setRestauranteId(id);
-          } else carregar();
+          carregar();
         }} />}
       <Grade colunas={colunasResumo}>
         {resumo.map((item) => (

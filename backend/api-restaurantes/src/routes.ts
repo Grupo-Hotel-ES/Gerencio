@@ -3,7 +3,7 @@ import { db, parseId } from '@geroncio/shared-db'
 
 const routes = Router()
 
-function extrairCamposEntrega(body: Record<string, any>) {
+export function extrairCamposEntrega(body: Record<string, any>) {
   const {
     latitude,
     longitude,

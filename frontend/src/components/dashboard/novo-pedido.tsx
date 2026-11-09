@@ -1,17 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Campo, SeletorRestaurante } from './formularios';
+import { Campo } from './formularios';
 import { Botao, Cartao, Chip, Texto } from './ui';
 import { Espacamento } from '@/constants/tokens';
 import { formatarReais } from '@/data/pedidos';
 import { cotarFrete, criarPedido, type CotacaoFrete, type NovoPedido } from '@/services/api-pedidos';
-import { listarProdutos, type Produto, type Restaurante } from '@/services/api-produtos';
+import { listarProdutos, type Produto } from '@/services/api-produtos';
 
-export function FormularioPedido({ restaurantes, restauranteInicial, onConcluir, onFechar }: {
-  restaurantes: Restaurante[]; restauranteInicial?: number; onConcluir: (restauranteId: number) => void; onFechar: () => void;
-}) {
-  const [restauranteId, setRestauranteId] = useState<number | undefined>(restauranteInicial ?? restaurantes[0]?.id);
+export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: () => void; onFechar: () => void }) {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [quantidades, setQuantidades] = useState<Record<number, number>>({});
   const [nomeCliente, setNomeCliente] = useState('');
@@ -21,7 +18,7 @@ export function FormularioPedido({ restaurantes, restauranteInicial, onConcluir,
   const [endereco, setEndereco] = useState('');
   const [cep, setCep] = useState('');
   const [erro, setErro] = useState<string | null>(null);
-  // A cotação vale para o restaurante, endereço e CEP em que foi feita (chave)
+  // A cotação vale para o endereço e o CEP em que foi feita (chave)
   const [frete, setFrete] = useState<{ chave: string; cotacao: CotacaoFrete } | null>(null);
   const [cotando, setCotando] = useState(false);
   const [erroFrete, setErroFrete] = useState<string | null>(null);
@@ -31,25 +28,24 @@ export function FormularioPedido({ restaurantes, restauranteInicial, onConcluir,
 
   useEffect(() => {
     let ativo = true;
-    if (!restauranteId) return;
-    listarProdutos(restauranteId).then((dados) => { if (ativo) setProdutos(dados); })
+    listarProdutos().then((dados) => { if (ativo) setProdutos(dados); })
       .catch((e: Error) => { if (ativo) setErro(e.message); })
       .finally(() => { if (ativo) setCarregando(false); });
     return () => { ativo = false; };
-  }, [restauranteId]);
+  }, []);
 
   const itens = produtos.filter((p) => quantidades[p.id] > 0).map((p) => ({ produtoId: p.id, quantidade: quantidades[p.id] }));
   const subtotal = produtos.reduce((soma, p) => soma + p.preco * (quantidades[p.id] ?? 0), 0);
-  const chaveFrete = `${restauranteId}|${endereco.trim()}|${cep.trim()}`;
+  const chaveFrete = `${endereco.trim()}|${cep.trim()}`;
   const cotacao = !retirada && frete?.chave === chaveFrete ? frete.cotacao : null;
   const taxaEntrega = cotacao?.taxaEntrega ?? 0;
   const total = subtotal + taxaEntrega;
 
   const calcularFrete = async () => {
-    if (!restauranteId || !endereco.trim() || !cep.trim()) { setErroFrete('Informe o endereço e o CEP.'); return; }
+    if (!endereco.trim() || !cep.trim()) { setErroFrete('Informe o endereço e o CEP.'); return; }
     setCotando(true); setErroFrete(null);
     try {
-      const resultado = await cotarFrete(restauranteId, endereco.trim(), cep.trim());
+      const resultado = await cotarFrete(endereco.trim(), cep.trim());
       setFrete({ chave: chaveFrete, cotacao: resultado });
       if (resultado.taxaEntrega === null) setErroFrete(resultado.motivoRecusa ?? 'Endereço fora da área de entrega.');
     } catch (e) { setFrete(null); setErroFrete((e as Error).message); }
@@ -58,22 +54,22 @@ export function FormularioPedido({ restaurantes, restauranteInicial, onConcluir,
 
   const salvar = async () => {
     if (enviando.current) return;
-    if (!restauranteId || !nomeCliente.trim() || itens.length === 0 || (!retirada && (!endereco.trim() || !cep.trim()))) {
-      setErro('Informe restaurante, cliente, produtos e o endereço com CEP para entrega.'); return;
+    if (!nomeCliente.trim() || itens.length === 0 || (!retirada && (!endereco.trim() || !cep.trim()))) {
+      setErro('Informe cliente, produtos e o endereço com CEP para entrega.'); return;
     }
     if (cotacao && cotacao.taxaEntrega === null) {
       setErro(cotacao.motivoRecusa ?? 'Endereço fora da área de entrega.'); return;
     }
     enviando.current = true; setSalvando(true); setErro(null);
     try {
-      await criarPedido({ restauranteId, nomeCliente: nomeCliente.trim(), app: canal, metodoPagamento: pagamento,
+      await criarPedido({ nomeCliente: nomeCliente.trim(), app: canal, metodoPagamento: pagamento,
         enderecoDestino: retirada ? 'Retirada no balcão' : endereco.trim(), cepDestino: retirada ? '' : cep.trim(), itens,
         // Sem cotação na tela, a api-pedidos calcula o frete ao criar a entrega
         ...(cotacao?.taxaEntrega != null && {
           custoEntrega: cotacao.taxaEntrega, distanciaKm: cotacao.distanciaKm,
           latitude: cotacao.destino.latitude, longitude: cotacao.destino.longitude,
         }) });
-      onConcluir(restauranteId);
+      onConcluir();
     } catch (e) { setErro((e as Error).message); }
     finally { enviando.current = false; setSalvando(false); }
   };
@@ -81,9 +77,6 @@ export function FormularioPedido({ restaurantes, restauranteInicial, onConcluir,
   return (
     <Cartao style={styles.formulario}>
       <Texto tamanho={20} peso={600}>Novo pedido manual</Texto>
-      <SeletorRestaurante restaurantes={restaurantes} valor={restauranteId} onChange={(id) => {
-        setProdutos([]); setQuantidades({}); setErro(null); setCarregando(true); setRestauranteId(id);
-      }} desabilitado={salvando} />
       <Campo rotulo="Nome do cliente" value={nomeCliente} onChangeText={setNomeCliente} editable={!salvando} />
       <View style={styles.linha}>
         {(['balcao', 'whatsapp'] as const).map((c) => <Chip key={c} rotulo={c === 'balcao' ? 'Balcão' : 'WhatsApp'} ativo={canal === c} onPress={salvando ? undefined : () => setCanal(c)} />)}

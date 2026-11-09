@@ -51,6 +51,7 @@ const ICONES = {
   loja: { ios: 'storefront', android: 'storefront', web: 'storefront' },
   subir: { ios: 'chevron.up', android: 'keyboard_arrow_up', web: 'keyboard_arrow_up' },
   mapa: { ios: 'map', android: 'map', web: 'map' },
+  sair: { ios: 'rectangle.portrait.and.arrow.right', android: 'logout', web: 'logout' },
 } as const satisfies Record<string, SymbolViewProps['name']>;
 
 export type NomeIcone = keyof typeof ICONES;

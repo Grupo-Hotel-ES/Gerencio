@@ -81,13 +81,13 @@ export async function requisitar<T>(caminho: string, init?: RequestInit, tempoLi
 }
 
 /** Pedidos ativos, incluindo os que estão em entrega, do mais recente para o mais antigo. */
-export async function listarPedidosAtivos(restauranteId?: number): Promise<Pedido[]> {
-  const pedidos = await requisitar<PedidoApi[]>(`/pedidos?status=${STATUS_ATIVOS.join(',')}${restauranteId ? `&restauranteId=${restauranteId}` : ''}`);
+export async function listarPedidosAtivos(): Promise<Pedido[]> {
+  const pedidos = await requisitar<PedidoApi[]>(`/pedidos?status=${STATUS_ATIVOS.join(',')}`);
   return pedidos.map(converter);
 }
 
+/** O restaurante (único) vem dos produtos do pedido. */
 export type NovoPedido = {
-  restauranteId: number;
   nomeCliente: string;
   app: 'balcao' | 'whatsapp';
   metodoPagamento: string;
@@ -111,11 +111,11 @@ export type CotacaoFrete = {
   destino: { latitude: number; longitude: number };
 };
 
-export async function cotarFrete(restauranteId: number, enderecoDestino: string, cepDestino: string) {
+export async function cotarFrete(enderecoDestino: string, cepDestino: string) {
   return requisitar<CotacaoFrete>('/pedidos/cotacao-frete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ restauranteId, enderecoDestino, cepDestino }),
+    body: JSON.stringify({ enderecoDestino, cepDestino }),
   });
 }
 

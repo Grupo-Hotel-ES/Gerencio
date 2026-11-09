@@ -1,39 +1,87 @@
 import { Link } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 
 import { Pagina, useLarguraConteudo } from '@/components/dashboard/pagina';
 import { Botao, Cartao, Etiqueta, Icone, Texto } from '@/components/dashboard/ui';
 import { Fonts } from '@/constants/theme';
 import { Espacamento, Raio } from '@/constants/tokens';
 import { obterIniciais, usePerfil, type DadosPerfil } from '@/data/perfil-context';
+import { useSessao } from '@/data/sessao';
 import { useCores } from '@/hooks/use-cores';
+import { trocarMinhaSenha } from '@/services/api-conta';
 
+/** Espera o restaurante carregar antes de montar o formulário. */
 export default function Perfil() {
+  const cores = useCores();
+  const { perfil, erro } = usePerfil();
+  if (!perfil) {
+    return (
+      <Pagina titulo="Perfil" subtitulo="Gerencie seus dados pessoais e as informações do seu restaurante.">
+        {erro ? <Texto cor="feedbackErro" accessibilityRole="alert">{erro}</Texto> : <ActivityIndicator color={cores.textoPrincipal} />}
+      </Pagina>
+    );
+  }
+  return <FormularioPerfil perfil={perfil} />;
+}
+
+function FormularioPerfil({ perfil }: { perfil: DadosPerfil }) {
   const cores = useCores();
   const larguraConteudo = useLarguraConteudo();
   const emColunas = larguraConteudo >= 980;
 
-  const { perfil, salvarPerfil } = usePerfil();
+  const { salvarPerfil, podeEditarRestaurante } = usePerfil();
+  const { usuario, sair } = useSessao();
 
   // Estado local do formulário para permitir edição antes de salvar
   const [form, setForm] = useState<DadosPerfil>(perfil);
   const [salvoComSucesso, setSalvoComSucesso] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  // Troca de senha
+  const [senhaAtual, setSenhaAtual] = useState('');
+  const [novaSenha, setNovaSenha] = useState('');
+  const [trocandoSenha, setTrocandoSenha] = useState(false);
+  const [avisoSenha, setAvisoSenha] = useState<{ ok: boolean; texto: string } | null>(null);
 
   const atualizarCampo = (campo: keyof DadosPerfil, valor: string | boolean) => {
     setForm((atual) => ({ ...atual, [campo]: valor }));
     setSalvoComSucesso(false);
   };
 
-  const handleSalvar = () => {
-    salvarPerfil(form);
-    setSalvoComSucesso(true);
-    setTimeout(() => setSalvoComSucesso(false), 3000);
+  const handleSalvar = async () => {
+    if (!form.nomeCompleto.trim()) { setErro('Informe o seu nome.'); return; }
+    if (podeEditarRestaurante && !form.nomeRestaurante.trim()) { setErro('Informe o nome do restaurante.'); return; }
+    setSalvando(true); setErro(null);
+    try {
+      await salvarPerfil(form);
+      setSalvoComSucesso(true);
+      setTimeout(() => setSalvoComSucesso(false), 3000);
+    } catch (e) {
+      setErro((e as Error).message);
+    } finally {
+      setSalvando(false);
+    }
   };
 
   const handleCancelar = () => {
     setForm(perfil);
     setSalvoComSucesso(false);
+    setErro(null);
+  };
+
+  const handleTrocarSenha = async () => {
+    setTrocandoSenha(true); setAvisoSenha(null);
+    try {
+      await trocarMinhaSenha(senhaAtual, novaSenha);
+      setSenhaAtual(''); setNovaSenha('');
+      setAvisoSenha({ ok: true, texto: '✓ Senha alterada.' });
+    } catch (e) {
+      setAvisoSenha({ ok: false, texto: (e as Error).message });
+    } finally {
+      setTrocandoSenha(false);
+    }
   };
 
   const estiloCampo = [
@@ -46,14 +94,7 @@ export default function Perfil() {
   return (
     <Pagina
       titulo="Perfil"
-      subtitulo="Gerencie seus dados pessoais e as informações do seu restaurante."
-      acao={
-        <Botao
-          rotulo="Editar perfil"
-          icone="editar"
-          onPress={() => {}}
-        />
-      }>
+      subtitulo="Gerencie seus dados pessoais e as informações do seu restaurante.">
       {/* Breadcrumb discreto */}
       <View style={styles.breadcrumb}>
         <Texto tamanho={13} cor="textoSecundario">
@@ -87,7 +128,7 @@ export default function Perfil() {
 
               <View style={styles.campoFlex}>
                 <Texto tamanho={13} peso={500} style={styles.label}>
-                  Telefone celular *
+                  Telefone celular
                 </Texto>
                 <TextInput
                   value={form.telefoneCelular}
@@ -100,7 +141,7 @@ export default function Perfil() {
             <View style={styles.linhaDupla}>
               <View style={styles.campoFlex}>
                 <Texto tamanho={13} peso={500} style={styles.label}>
-                  E-mail de acesso *
+                  E-mail
                 </Texto>
                 <TextInput
                   value={form.emailAcesso}
@@ -108,7 +149,7 @@ export default function Perfil() {
                   style={estiloCampo}
                 />
                 <Texto tamanho={12} cor="textoSecundario" style={{ marginTop: 4 }}>
-                  O e-mail informado é utilizado para acessar sua conta.
+                  Para entrar, use o usuário {usuario?.login}.
                 </Texto>
               </View>
 
@@ -116,11 +157,10 @@ export default function Perfil() {
                 <Texto tamanho={13} peso={500} style={styles.label}>
                   Cargo / função
                 </Texto>
-                <TextInput
-                  value={form.cargo}
-                  onChangeText={(t) => atualizarCampo('cargo', t)}
-                  style={estiloCampo}
-                />
+                <TextInput value={form.cargo} editable={false} style={[estiloCampo, styles.somenteLeitura]} />
+                <Texto tamanho={12} cor="textoSecundario" style={{ marginTop: 4 }}>
+                  Definida pelo administrador em Usuários e permissões.
+                </Texto>
               </View>
             </View>
           </Cartao>
@@ -131,7 +171,9 @@ export default function Perfil() {
               Dados do restaurante
             </Texto>
             <Texto tamanho={13} cor="textoSecundario">
-              Identificação e canais de contato do seu restaurante.
+              {podeEditarRestaurante
+                ? 'Identificação e canais de contato do seu restaurante.'
+                : 'Somente administradores e gerentes alteram os dados do restaurante.'}
             </Texto>
 
             <View style={styles.linhaDupla}>
@@ -142,6 +184,7 @@ export default function Perfil() {
                 <TextInput
                   value={form.nomeRestaurante}
                   onChangeText={(t) => atualizarCampo('nomeRestaurante', t)}
+                  editable={podeEditarRestaurante}
                   style={estiloCampo}
                 />
               </View>
@@ -153,6 +196,7 @@ export default function Perfil() {
                 <TextInput
                   value={form.razaoSocial}
                   onChangeText={(t) => atualizarCampo('razaoSocial', t)}
+                  editable={podeEditarRestaurante}
                   style={estiloCampo}
                 />
               </View>
@@ -166,6 +210,7 @@ export default function Perfil() {
                 <TextInput
                   value={form.cnpj}
                   onChangeText={(t) => atualizarCampo('cnpj', t)}
+                  editable={podeEditarRestaurante}
                   style={estiloCampo}
                 />
               </View>
@@ -177,6 +222,7 @@ export default function Perfil() {
                 <TextInput
                   value={form.categoria}
                   onChangeText={(t) => atualizarCampo('categoria', t)}
+                  editable={podeEditarRestaurante}
                   style={estiloCampo}
                 />
               </View>
@@ -190,6 +236,7 @@ export default function Perfil() {
                 <TextInput
                   value={form.telefoneRestaurante}
                   onChangeText={(t) => atualizarCampo('telefoneRestaurante', t)}
+                  editable={podeEditarRestaurante}
                   style={estiloCampo}
                 />
               </View>
@@ -201,6 +248,7 @@ export default function Perfil() {
                 <TextInput
                   value={form.emailContato}
                   onChangeText={(t) => atualizarCampo('emailContato', t)}
+                  editable={podeEditarRestaurante}
                   style={estiloCampo}
                 />
               </View>
@@ -224,6 +272,7 @@ export default function Perfil() {
                 <TextInput
                   value={form.cep}
                   onChangeText={(t) => atualizarCampo('cep', t)}
+                  editable={podeEditarRestaurante}
                   style={estiloCampo}
                 />
               </View>
@@ -235,6 +284,7 @@ export default function Perfil() {
                 <TextInput
                   value={form.cidadeUf}
                   onChangeText={(t) => atualizarCampo('cidadeUf', t)}
+                  editable={podeEditarRestaurante}
                   style={estiloCampo}
                 />
               </View>
@@ -247,6 +297,7 @@ export default function Perfil() {
               <TextInput
                 value={form.logradouro}
                 onChangeText={(t) => atualizarCampo('logradouro', t)}
+                  editable={podeEditarRestaurante}
                 style={estiloCampo}
               />
             </View>
@@ -259,6 +310,7 @@ export default function Perfil() {
                 <TextInput
                   value={form.numero}
                   onChangeText={(t) => atualizarCampo('numero', t)}
+                  editable={podeEditarRestaurante}
                   style={estiloCampo}
                 />
               </View>
@@ -270,6 +322,7 @@ export default function Perfil() {
                 <TextInput
                   value={form.complemento}
                   onChangeText={(t) => atualizarCampo('complemento', t)}
+                  editable={podeEditarRestaurante}
                   style={estiloCampo}
                 />
               </View>
@@ -281,6 +334,7 @@ export default function Perfil() {
                 <TextInput
                   value={form.bairro}
                   onChangeText={(t) => atualizarCampo('bairro', t)}
+                  editable={podeEditarRestaurante}
                   style={estiloCampo}
                 />
               </View>
@@ -293,19 +347,20 @@ export default function Perfil() {
               <Texto tamanho={13} cor="textoSecundario">
                 * Campos obrigatórios
               </Texto>
-              <Texto tamanho={13} cor="textoSecundario">
-                {salvoComSucesso
+              <Texto tamanho={13} cor={erro ? 'feedbackErro' : 'textoSecundario'}>
+                {erro ?? (salvoComSucesso
                   ? '✓ Alterações salvas com sucesso!'
-                  : 'Revise seus dados e os do restaurante antes de salvar.'}
+                  : 'Revise seus dados e os do restaurante antes de salvar.')}
               </Texto>
             </View>
 
             <View style={styles.linhaBotoes}>
-              <Botao rotulo="Cancelar" onPress={handleCancelar} />
+              <Botao rotulo="Cancelar" disabled={salvando} onPress={handleCancelar} />
               <Botao
-                rotulo="Salvar alterações"
+                rotulo={salvando ? 'Salvando…' : 'Salvar alterações'}
                 icone="salvar"
                 variante="primario"
+                disabled={salvando}
                 onPress={handleSalvar}
               />
             </View>
@@ -361,21 +416,57 @@ export default function Perfil() {
             </Texto>
 
             <Texto peso={600}>
-              Administradora do restaurante
+              {form.cargo} • usuário {usuario?.login}
             </Texto>
 
             <Texto tamanho={13} cor="textoSecundario" style={{ lineHeight: 18 }}>
-              Seu acesso permite gerenciar os dados do Vila Bistrô e acompanhar a operação.
+              {usuario?.papel === 'administrador'
+                ? 'Para gerenciar a equipe e os acessos, abra Usuários e permissões.'
+                : 'Para mudar sua função ou recuperar o acesso, fale com um administrador.'}
             </Texto>
 
-            <Texto tamanho={13} cor="textoSecundario" style={{ lineHeight: 18 }}>
-              Para gerenciar a equipe e os acessos, abra Usuários e permissões.
-            </Texto>
-
-            <Link href="/configuracoes" asChild>
-              <Botao rotulo="Usuários e permissões" />
-            </Link>
+            {usuario?.papel === 'administrador' && (
+              <Link href="/configuracoes" asChild>
+                <Botao rotulo="Usuários e permissões" />
+              </Link>
+            )}
           </Cartao>
+
+          {/* Card: Trocar senha */}
+          <Cartao style={styles.cartaoLateral}>
+            <Texto accessibilityRole="header" tamanho={18} peso={600}>
+              Trocar senha
+            </Texto>
+            <TextInput
+              accessibilityLabel="Senha atual"
+              value={senhaAtual}
+              onChangeText={setSenhaAtual}
+              secureTextEntry
+              placeholder="Senha atual"
+              placeholderTextColor={cores.textoSecundario}
+              style={estiloCampo}
+            />
+            <TextInput
+              accessibilityLabel="Nova senha"
+              value={novaSenha}
+              onChangeText={setNovaSenha}
+              secureTextEntry
+              placeholder="Nova senha (mínimo 6 caracteres)"
+              placeholderTextColor={cores.textoSecundario}
+              style={estiloCampo}
+            />
+            {avisoSenha && (
+              <Texto tamanho={13} cor={avisoSenha.ok ? 'statusEntregue' : 'feedbackErro'}>{avisoSenha.texto}</Texto>
+            )}
+            <Botao
+              rotulo={trocandoSenha ? 'Salvando…' : 'Trocar senha'}
+              icone="cadeado"
+              disabled={trocandoSenha || !senhaAtual || novaSenha.length < 6}
+              onPress={handleTrocarSenha}
+            />
+          </Cartao>
+
+          <Botao rotulo="Sair" icone="sair" onPress={sair} />
         </View>
       </View>
     </Pagina>
@@ -458,6 +549,9 @@ const styles = StyleSheet.create({
   },
   blocoLoja: {
     paddingVertical: Espacamento.xsmall,
+  },
+  somenteLeitura: {
+    opacity: 0.7,
   },
 });
 

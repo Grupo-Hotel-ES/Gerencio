@@ -1,7 +1,6 @@
 import { requisitarApi } from './http';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_PRODUTOS_URL ?? 'http://localhost:3004';
-const RESTAURANTES_URL = process.env.EXPO_PUBLIC_API_RESTAURANTES_URL ?? 'http://localhost:3003/api';
 
 export type Restaurante = { id: number; nome: string; endereco?: string; cidade?: string };
 export type Produto = {
@@ -17,16 +16,13 @@ export type Produto = {
 type ProdutoApi = Omit<Produto, 'preco'> & { preco: string };
 const converter = (produto: ProdutoApi): Produto => ({ ...produto, preco: Number(produto.preco) });
 
-export function listarRestaurantes() {
-  return requisitarApi<Restaurante[]>(RESTAURANTES_URL, '/restaurantes');
-}
-
-export async function listarProdutos(restauranteId?: number): Promise<Produto[]> {
-  const produtos = await requisitarApi<ProdutoApi[]>(BASE_URL, `/produtos${restauranteId ? `?restauranteId=${restauranteId}` : ''}`);
+export async function listarProdutos(): Promise<Produto[]> {
+  const produtos = await requisitarApi<ProdutoApi[]>(BASE_URL, '/produtos');
   return produtos.map(converter);
 }
 
-export async function criarProduto(dados: Pick<Produto, 'nome' | 'preco' | 'categoria' | 'quantidade' | 'restauranteId'>) {
+/** O produto vai para o restaurante do app (único); a api-produtos resolve o id. */
+export async function criarProduto(dados: Pick<Produto, 'nome' | 'preco' | 'categoria' | 'quantidade'>) {
   return converter(await requisitarApi<ProdutoApi>(BASE_URL, '/produtos', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados),
   }));
@@ -46,8 +42,8 @@ export async function excluirProduto(id: number) {
 /** Código (SKU) que o produto tem em uma plataforma de delivery (tabela MapeamentoApp). */
 export type Mapeamento = { id: number; produtoId: number; plataforma: string; idExternoApp: string };
 
-export function listarMapeamentos(restauranteId?: number) {
-  return requisitarApi<Mapeamento[]>(BASE_URL, `/mapeamentos${restauranteId ? `?restauranteId=${restauranteId}` : ''}`);
+export function listarMapeamentos() {
+  return requisitarApi<Mapeamento[]>(BASE_URL, '/mapeamentos');
 }
 
 export function criarMapeamento(dados: Omit<Mapeamento, 'id'>) {

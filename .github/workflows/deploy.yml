@@ -1,0 +1,91 @@
+# Verifica e publica o site da VPS a cada push na develop.
+# Segredos (Settings → Secrets and variables → Actions):
+#   VPS_HOST         IP ou domínio da VPS
+#   VPS_USER         usuário SSH (ex.: root)
+#   VPS_SSH_KEY      chave privada cuja pública está em ~/.ssh/authorized_keys da VPS
+#   VPS_KNOWN_HOSTS  saída de `ssh-keyscan <host>` (opcional; sem ela, o host é lido na hora)
+#   VPS_PORT         porta SSH (opcional, padrão 22)
+#   VPS_DIR          pasta do repositório na VPS (opcional, padrão /root/Gerencio)
+name: Deploy
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+# Um deploy por vez; um push novo espera o anterior terminar.
+concurrency:
+  group: deploy-producao
+  cancel-in-progress: false
+
+jobs:
+  verificar:
+    name: Verificar
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Backend — dependências
+        working-directory: backend
+        run: pnpm install --frozen-lockfile
+
+      - name: Backend — testes de integração
+        run: pnpm test:integracao
+
+      - name: Backend — typecheck
+        working-directory: backend
+        run: pnpm db:generate && pnpm typecheck
+
+      - name: Frontend — dependências
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      # Ainda há erros de lint antigos; só avisa, não bloqueia o deploy.
+      - name: Frontend — lint
+        working-directory: frontend
+        continue-on-error: true
+        run: pnpm lint
+
+  deploy:
+    name: Publicar na VPS
+    needs: verificar
+    runs-on: ubuntu-latest
+    environment: producao
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          if [ -n "$VPS_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "${VPS_PORT:-22}" "$VPS_HOST" > ~/.ssh/known_hosts
+          fi
+
+      - name: Rodar o deploy
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_DIR: ${{ secrets.VPS_DIR }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" \
+            "GERONCIO_DIR='${VPS_DIR:-/root/Gerencio}' BRANCH=develop bash -s" \
+            < scripts/deploy.sh
