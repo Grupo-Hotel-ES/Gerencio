@@ -150,7 +150,7 @@ O banco e a API continuam rodando depois de fechar o formulário; para derrubá-
 
 ### Política de testes
 
-Primeiro estabilizamos a base de testes do PR #46 e integramos o PR #47 de rotas. Depois ampliaremos a cobertura de todas as partes do projeto em PRs pequenos por fluxo, com cenários aprovados e resultados documentados. Durante essa sequência, os testes existentes continuam obrigatórios e as falhas conhecidas devem ser corrigidas. Leia as [regras de testes](docs/regras-de-testes.md) e o [plano de cobertura](docs/cobertura-testes.md#plano-de-ampliação-após-o-pr-47).
+Primeiro estabilizamos a base de testes do PR #46 e integramos o PR #47 de ganhos e repasses dos motoboys. Depois ampliaremos a cobertura de todas as partes do projeto em PRs pequenos por fluxo, com cenários aprovados e resultados documentados. Durante essa sequência, os testes existentes continuam obrigatórios e as falhas conhecidas devem ser corrigidas. Leia as [regras de testes](docs/regras-de-testes.md) e o [plano de cobertura](docs/cobertura-testes.md#plano-de-ampliação-após-o-pr-47).
 
 ## Deploy (VPS)
 

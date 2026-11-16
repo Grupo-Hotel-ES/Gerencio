@@ -126,4 +126,4 @@ O relatório de integração fica em `.resultados-testes/integracao.tap`. O work
 
 Para propor um cenário novo, escreva primeiro uma frase **“quando ..., então ...”**, confirme-a com o responsável conforme as [regras](regras-de-testes.md) e defina o que será observado. Inclua sucesso, entradas inválidas, repetição, concorrência e limites quando se aplicarem. Ao entregar, informe a revisão, os comandos, o resultado real e as lacunas de cobertura.
 
-A sequência acordada é estabilizar o PR #46, integrar o PR #47 de rotas e então ampliar a cobertura de todas as partes em PRs pequenos. Consulte a [política de evolução](regras-de-testes.md#política-de-evolução-acordada-em-09112026) e o [plano de cobertura](cobertura-testes.md#plano-de-ampliação-após-o-pr-47).
+A sequência acordada é estabilizar o PR #46, integrar o PR #47 de ganhos e repasses dos motoboys e então ampliar a cobertura de todas as partes em PRs pequenos. Consulte a [política de evolução](regras-de-testes.md#política-de-evolução-acordada-em-09112026) e o [plano de cobertura](cobertura-testes.md#plano-de-ampliação-após-o-pr-47).
