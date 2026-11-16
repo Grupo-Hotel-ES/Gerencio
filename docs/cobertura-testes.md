@@ -7,7 +7,7 @@ Comportamentos desta primeira etapa confirmados pelo responsável pelo projeto n
 | Fluxo | Risco | Cobertura nesta etapa |
 | --- | --- | --- |
 | Cadastro de restaurante | Dados inválidos ou não persistidos | Cadastro e consulta HTTP; ausência de nome sem gravação; listagem completa; atualização PUT e PATCH com validação; exclusão com cascade de credenciais; consulta de cardápio isolado |
-| Produtos e pedidos manuais | Preço adulterado, itens inconsistentes, mistura de restaurantes | Suíte existente de pedidos/estoque preservada |
+| Produtos e pedidos manuais | Preço adulterado, itens inconsistentes, mistura de restaurantes | Suíte existente de pedidos/estoque preservada; ciclo cadastral completo de produtos (GET lista e detalhe, PUT, PATCH, DELETE e POST arquivar) com isolamento por restaurante |
 | Aceite, cancelamento e estoque | Baixa duplicada, saldo negativo, devolução duplicada, gravação parcial | Suíte existente: concorrência de aceites e disputa de saldo, ciclo e ajustes |
 | Entrada de webhooks de delivery | Duplicação e falsificação de eventos | Dois POSTs iFood simultâneos; rejeição de assinatura Rappi inválida |
 | Processamento posterior do delivery | Pedido duplicado e mapeamento incorreto | Cenário legado chama processador diretamente com adapter simulado; não comprova o fluxo HTTP completo nem a conversão real |
@@ -44,7 +44,7 @@ Decisão do responsável em 09/11/2026: estabilizar e integrar primeiro o PR #46
 
 Para cada parte: inventariar o comportamento final, apresentar cenários "quando ..., então ...", obter a confirmação do responsável, implementar os testes adequados e registrar resultados e lacunas. Entregar em PRs pequenos e revisáveis por fluxo. O número de cenários não substitui essa avaliação de cobertura.
 
-## Quinze cenários aprovados
+## Vinte e um cenários aprovados em fluxos críticos
 
 ```text
 describe "Cadastro de restaurante"
@@ -55,6 +55,14 @@ describe "Cadastro de restaurante"
   it "quando atualiza parcialmente via PATCH, então altera apenas os campos informados sem resetar os demais"
   it "quando deleta o restaurante, então remove o registro e suas credenciais em cascata"
   it "quando consulta os produtos do restaurante, então retorna apenas o cardápio daquele estabelecimento"
+
+describe "Catálogo de produtos"
+  it "quando lista produtos, então retorna os itens ativos ordenados por nome e filtra por restaurante"
+  it "quando consulta detalhe do produto por id, então retorna os dados com o restaurante vinculado"
+  it "quando atualiza todos os dados do produto via PUT, então substitui os valores e impede troca de restaurante"
+  it "quando atualiza parcialmente via PATCH, então altera apenas os campos informados sem resetar os demais"
+  it "quando deleta o produto sem pedidos, então remove do banco; se tiver pedidos, então responde 409"
+  it "quando arquiva o produto, então define data de arquivamento, incrementa versaoEstoque e bloqueia edições"
 
 describe "Webhook de delivery"
   it "quando dois webhooks iFood iguais chegam simultaneamente, então persiste um único evento"
@@ -89,13 +97,12 @@ Implementação: `backend/testes/clientes-pedidos.test.ts`, pelas APIs de client
 
 ## Resultado da execução local
 
-- Data: 09/11/2026 (merge okita ← develop).
+- Data: 16/11/2026.
 - Comando: `pnpm test:integracao` na raiz.
-- Ambiente: Node.js 24, PostgreSQL 16 em container temporário e 12 migrations existentes aplicadas no banco de teste vazio.
-- Cenários de comportamento: **26 passaram e 0 falharam** (BUG-TESTE-001 corrigido pela develop).
-- O resumo do Node informa **27 testes, 27 aprovados, 0 reprovados**, incluindo o teste agregador dos onze cenários legados.
+- Ambiente: Node.js 24, PostgreSQL 16 em container temporário e 15 migrations existentes aplicadas no banco de teste vazio.
+- Resumo do Node: **42 testes em 6 suítes, 42 aprovados, 0 reprovados** (incluindo o Bloco 1 de Restaurantes, Bloco 2 de Produtos, Clientes, Delivery, Pagamentos Stripe, Ganhos de Motoboys e cenários legados de Pedidos/Estoque).
 - Ignorados, pendentes e cancelados: **zero**.
 - `pnpm typecheck` no backend: passou.
 - `pnpm exec tsc --noEmit -p testes/tsconfig.json`: passou.
 
-O comando retorna código 0 após a correção do BUG-TESTE-001 integrada pela develop. O relatório TAP detalhado fica em `.resultados-testes/integracao.tap` e é recriado a cada execução.
+O comando retorna código 0. O relatório TAP detalhado fica em `.resultados-testes/integracao.tap` e é recriado a cada execução.

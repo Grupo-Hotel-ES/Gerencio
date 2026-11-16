@@ -327,6 +327,263 @@ describe('Cadastro de restaurante', () => {
   })
 })
 
+describe('Catálogo de produtos', () => {
+  it('quando lista produtos, então retorna os itens ativos ordenados por nome e filtra por restaurante', async () => {
+    const [resA, resB] = await Promise.all([
+      requisitar(apiRestaurantes, '/api/restaurantes', 'POST', dadosRestaurante()),
+      requisitar(apiRestaurantes, '/api/restaurantes', 'POST', dadosRestaurante()),
+    ])
+    assert.equal(resA.status, 201)
+    assert.equal(resB.status, 201)
+    const idA = resA.dados.id as number
+    const idB = resB.dados.id as number
+
+    const [prodA1, prodA2, prodB] = await Promise.all([
+      requisitar(apiProdutos, '/produtos', 'POST', { restauranteId: idA, nome: 'Batata Frita', preco: '15.00', quantidade: 20 }),
+      requisitar(apiProdutos, '/produtos', 'POST', { restauranteId: idA, nome: 'Alface Salada', preco: '12.00', quantidade: 5 }),
+      requisitar(apiProdutos, '/produtos', 'POST', { restauranteId: idB, nome: 'Calzone', preco: '40.00', quantidade: 8 }),
+    ])
+    assert.equal(prodA1.status, 201)
+    assert.equal(prodA2.status, 201)
+    assert.equal(prodB.status, 201)
+
+    const prodArquivado = await requisitar(apiProdutos, '/produtos', 'POST', {
+      restauranteId: idA, nome: 'Antigo Fora de Linha', preco: '10.00', quantidade: 0,
+    })
+    assert.equal(prodArquivado.status, 201)
+    const arquivamento = await requisitar(apiProdutos, `/produtos/${prodArquivado.dados.id}/arquivar`, 'POST')
+    assert.equal(arquivamento.status, 200)
+
+    const listaA = await requisitar(apiProdutos, `/produtos?restauranteId=${idA}`)
+    assert.equal(listaA.status, 200)
+    assert.ok(Array.isArray(listaA.dados))
+
+    const nomesA = listaA.dados.map((p: any) => p.nome)
+    assert.ok(nomesA.includes('Alface Salada'))
+    assert.ok(nomesA.includes('Batata Frita'))
+    assert.ok(!nomesA.includes('Calzone'))
+    assert.ok(!nomesA.includes('Antigo Fora de Linha'), 'Produto arquivado não deve aparecer na listagem')
+
+    const itensA = listaA.dados.filter((p: any) => p.id === prodA1.dados.id || p.id === prodA2.dados.id)
+    assert.equal(itensA[0].id, prodA2.dados.id)
+    assert.equal(itensA[1].id, prodA1.dados.id)
+
+    const resposta400 = await requisitar(apiProdutos, '/produtos?restauranteId=invalido')
+    assert.equal(resposta400.status, 400)
+    assert.equal(resposta400.dados.error, 'restauranteId inválido')
+  })
+
+  it('quando consulta detalhe do produto por id, então retorna os dados com o restaurante vinculado', async () => {
+    const res = await requisitar(apiRestaurantes, '/api/restaurantes', 'POST', dadosRestaurante())
+    assert.equal(res.status, 201)
+    const restauranteId = res.dados.id as number
+
+    const criado = await requisitar(apiProdutos, '/produtos', 'POST', {
+      restauranteId, nome: 'Hambúrguer Artesanal', preco: '35.50', quantidade: 15, categoria: 'Burgers',
+    })
+    assert.equal(criado.status, 201)
+    const id = criado.dados.id as number
+
+    const detalhe = await requisitar(apiProdutos, `/produtos/${id}`)
+    assert.equal(detalhe.status, 200)
+    assert.equal(detalhe.dados.id, id)
+    assert.equal(detalhe.dados.nome, 'Hambúrguer Artesanal')
+    assert.equal(Number(detalhe.dados.preco), 35.50)
+    assert.equal(detalhe.dados.quantidade, 15)
+    assert.equal(detalhe.dados.categoria, 'Burgers')
+    assert.ok(detalhe.dados.restaurante)
+    assert.equal(detalhe.dados.restaurante.id, restauranteId)
+
+    const resposta404 = await requisitar(apiProdutos, '/produtos/99999999')
+    assert.equal(resposta404.status, 404)
+    assert.equal(resposta404.dados.error, 'Produto não encontrado')
+
+    const resposta400 = await requisitar(apiProdutos, '/produtos/invalido')
+    assert.equal(resposta400.status, 400)
+    assert.equal(resposta400.dados.error, 'Id inválido')
+  })
+
+  it('quando atualiza todos os dados do produto via PUT, então substitui os valores e impede troca de restaurante', async () => {
+    const [resA, resB] = await Promise.all([
+      requisitar(apiRestaurantes, '/api/restaurantes', 'POST', dadosRestaurante()),
+      requisitar(apiRestaurantes, '/api/restaurantes', 'POST', dadosRestaurante()),
+    ])
+    assert.equal(resA.status, 201)
+    assert.equal(resB.status, 201)
+    const idA = resA.dados.id as number
+    const idB = resB.dados.id as number
+
+    const criado = await requisitar(apiProdutos, '/produtos', 'POST', {
+      restauranteId: idA, nome: 'Prato do Dia', preco: '20.00', quantidade: 10,
+    })
+    assert.equal(criado.status, 201)
+    const id = criado.dados.id as number
+
+    const respostaPut = await requisitar(apiProdutos, `/produtos/${id}`, 'PUT', {
+      nome: 'Prato Executivo Especial', preco: '28.50', restauranteId: idA,
+    })
+    assert.equal(respostaPut.status, 200)
+    assert.equal(respostaPut.dados.nome, 'Prato Executivo Especial')
+    assert.equal(Number(respostaPut.dados.preco), 28.50)
+
+    const noBanco = await db.produto.findUnique({ where: { id } })
+    assert.ok(noBanco)
+    assert.equal(noBanco.nome, 'Prato Executivo Especial')
+    assert.equal(Number(noBanco.preco), 28.50)
+
+    const tentativaTroca = await requisitar(apiProdutos, `/produtos/${id}`, 'PUT', {
+      nome: 'Tentativa Troca', preco: '30.00', restauranteId: idB,
+    })
+    assert.equal(tentativaTroca.status, 400)
+    assert.equal(tentativaTroca.dados.error, 'O restaurante de um produto não pode ser alterado')
+
+    const respostaInvalida = await requisitar(apiProdutos, `/produtos/${id}`, 'PUT', {
+      nome: '', preco: -5, restauranteId: idA,
+    })
+    assert.equal(respostaInvalida.status, 400)
+    assert.equal(respostaInvalida.dados.error, 'Nome, preço e restauranteId são obrigatórios.')
+
+    const resposta404 = await requisitar(apiProdutos, '/produtos/99999999', 'PUT', {
+      nome: 'Inexistente', preco: '10.00', restauranteId: idA,
+    })
+    assert.equal(resposta404.status, 404)
+    assert.equal(resposta404.dados.error, 'Produto não encontrado')
+
+    const resposta400Id = await requisitar(apiProdutos, '/produtos/invalido', 'PUT', {
+      nome: 'Teste', preco: '10.00', restauranteId: idA,
+    })
+    assert.equal(resposta400Id.status, 400)
+    assert.equal(resposta400Id.dados.error, 'Id inválido')
+  })
+
+  it('quando atualiza parcialmente via PATCH, então altera apenas os campos informados sem resetar os demais', async () => {
+    const res = await requisitar(apiRestaurantes, '/api/restaurantes', 'POST', dadosRestaurante())
+    assert.equal(res.status, 201)
+    const restauranteId = res.dados.id as number
+
+    const criado = await requisitar(apiProdutos, '/produtos', 'POST', {
+      restauranteId, nome: 'Pizza de Mussarela', preco: '50.00', quantidade: 8, categoria: 'Pizzas',
+    })
+    assert.equal(criado.status, 201)
+    const id = criado.dados.id as number
+
+    const respostaPatch = await requisitar(apiProdutos, `/produtos/${id}`, 'PATCH', {
+      categoria: 'Pizzas Tradicionais', preco: 55.90,
+    })
+    assert.equal(respostaPatch.status, 200)
+
+    const noBanco = await db.produto.findUnique({ where: { id } })
+    assert.ok(noBanco)
+    assert.equal(noBanco.categoria, 'Pizzas Tradicionais')
+    assert.equal(Number(noBanco.preco), 55.90)
+    assert.equal(noBanco.nome, 'Pizza de Mussarela')
+    assert.equal(noBanco.quantidade, 8)
+    assert.equal(noBanco.restauranteId, restauranteId)
+
+    const tentativaTroca = await requisitar(apiProdutos, `/produtos/${id}`, 'PATCH', {
+      restauranteId: 99999999,
+    })
+    assert.equal(tentativaTroca.status, 400)
+    assert.equal(tentativaTroca.dados.error, 'Nome, categoria ou preço inválido, ou tentativa de alterar o restaurante do produto')
+
+    const precoInvalido = await requisitar(apiProdutos, `/produtos/${id}`, 'PATCH', { preco: -10 })
+    assert.equal(precoInvalido.status, 400)
+
+    const resposta404 = await requisitar(apiProdutos, '/produtos/99999999', 'PATCH', { nome: 'Inexistente' })
+    assert.equal(resposta404.status, 404)
+    assert.equal(resposta404.dados.error, 'Produto não encontrado')
+
+    const resposta400Id = await requisitar(apiProdutos, '/produtos/invalido', 'PATCH', { nome: 'Teste' })
+    assert.equal(resposta400Id.status, 400)
+    assert.equal(resposta400Id.dados.error, 'Id inválido')
+  })
+
+  it('quando deleta o produto sem pedidos, então remove do banco; se tiver pedidos, então responde 409', async () => {
+    const res = await requisitar(apiRestaurantes, '/api/restaurantes', 'POST', dadosRestaurante())
+    assert.equal(res.status, 201)
+    const restauranteId = res.dados.id as number
+
+    const semPedidos = await requisitar(apiProdutos, '/produtos', 'POST', {
+      restauranteId, nome: 'Sobremesa Sem Vendas', preco: '14.00', quantidade: 5,
+    })
+    assert.equal(semPedidos.status, 201)
+    const idSemPedidos = semPedidos.dados.id as number
+
+    const respostaDelete = await requisitar(apiProdutos, `/produtos/${idSemPedidos}`, 'DELETE')
+    assert.equal(respostaDelete.status, 204)
+    assert.equal(respostaDelete.dados, null)
+    assert.equal(await db.produto.count({ where: { id: idSemPedidos } }), 0)
+
+    const comPedidos = await requisitar(apiProdutos, '/produtos', 'POST', {
+      restauranteId, nome: 'Item Vendido no Balcão', preco: '25.00', quantidade: 10,
+    })
+    assert.equal(comPedidos.status, 201)
+    const idComPedidos = comPedidos.dados.id as number
+
+    const pedidoCriado = await requisitar(apiPedidos, '/api/pedidos', 'POST', {
+      restauranteId, nomeCliente: 'Cliente Exclusão', app: 'balcao', metodoPagamento: 'dinheiro',
+      enderecoDestino: 'Retirada', cepDestino: '',
+      itens: [{ produtoId: idComPedidos, quantidade: 1 }],
+    })
+    assert.equal(pedidoCriado.status, 201)
+
+    const tentativaDeleteComPedido = await requisitar(apiProdutos, `/produtos/${idComPedidos}`, 'DELETE')
+    assert.equal(tentativaDeleteComPedido.status, 409)
+    assert.ok(tentativaDeleteComPedido.dados.error.includes('aparece em 1 pedido'))
+    assert.equal(await db.produto.count({ where: { id: idComPedidos } }), 1)
+
+    const resposta404 = await requisitar(apiProdutos, '/produtos/99999999', 'DELETE')
+    assert.equal(resposta404.status, 404)
+    assert.equal(resposta404.dados.error, 'Produto não encontrado')
+
+    const resposta400 = await requisitar(apiProdutos, '/produtos/invalido', 'DELETE')
+    assert.equal(resposta400.status, 400)
+    assert.equal(resposta400.dados.error, 'Id inválido')
+  })
+
+  it('quando arquiva o produto, então define data de arquivamento, incrementa versaoEstoque e bloqueia edições', async () => {
+    const res = await requisitar(apiRestaurantes, '/api/restaurantes', 'POST', dadosRestaurante())
+    assert.equal(res.status, 201)
+    const restauranteId = res.dados.id as number
+
+    const prod = await requisitar(apiProdutos, '/produtos', 'POST', {
+      restauranteId, nome: 'Bebida de Verão', preco: '8.00', quantidade: 12,
+    })
+    assert.equal(prod.status, 201)
+    const id = prod.dados.id as number
+    const versaoInicial = prod.dados.versaoEstoque as number
+
+    const arquivado = await requisitar(apiProdutos, `/produtos/${id}/arquivar`, 'POST')
+    assert.equal(arquivado.status, 200)
+    assert.ok(arquivado.dados.arquivadoEm)
+
+    const noBanco = await db.produto.findUnique({ where: { id } })
+    assert.ok(noBanco?.arquivadoEm)
+    assert.equal(noBanco?.versaoEstoque, versaoInicial + 1)
+
+    const tentativaPut = await requisitar(apiProdutos, `/produtos/${id}`, 'PUT', {
+      nome: 'Tentativa Novo Nome', preco: '9.00', restauranteId,
+    })
+    assert.equal(tentativaPut.status, 404)
+    assert.equal(tentativaPut.dados.error, 'Produto não encontrado')
+
+    const tentativaPatch = await requisitar(apiProdutos, `/produtos/${id}`, 'PATCH', { preco: 10.00 })
+    assert.equal(tentativaPatch.status, 404)
+    assert.equal(tentativaPatch.dados.error, 'Produto não encontrado')
+
+    const reArquivar = await requisitar(apiProdutos, `/produtos/${id}/arquivar`, 'POST')
+    assert.equal(reArquivar.status, 200)
+
+    const resposta404 = await requisitar(apiProdutos, '/produtos/99999999/arquivar', 'POST')
+    assert.equal(resposta404.status, 404)
+    assert.equal(resposta404.dados.error, 'Produto não encontrado')
+
+    const resposta400 = await requisitar(apiProdutos, '/produtos/invalido/arquivar', 'POST')
+    assert.equal(resposta400.status, 400)
+    assert.equal(resposta400.dados.error, 'Id inválido')
+  })
+})
+
 describe('Webhook de delivery', () => {
   it('quando dois webhooks iFood iguais chegam simultaneamente, então persiste um único evento', async () => {
     const evento = { id: randomUUID(), orderId: randomUUID(), merchantId: randomUUID(), code: 'PLACED' }
