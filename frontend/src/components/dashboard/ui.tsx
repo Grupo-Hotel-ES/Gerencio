@@ -20,6 +20,7 @@ const ICONES = {
   pedidos: { ios: 'list.bullet.rectangle', android: 'receipt_long', web: 'receipt_long' },
   estoque: { ios: 'shippingbox', android: 'inventory_2', web: 'inventory_2' },
   relatorios: { ios: 'chart.bar', android: 'bar_chart', web: 'bar_chart' },
+  ganhos: { ios: 'chart.bar.fill', android: 'bar_chart', web: 'bar_chart' },
   rotas: { ios: 'arrow.triangle.swap', android: 'route', web: 'route' },
   configuracoes: { ios: 'gearshape', android: 'settings', web: 'settings' },
   camadas: { ios: 'square.stack.3d.up', android: 'layers', web: 'layers' },
