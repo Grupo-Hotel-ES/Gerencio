@@ -10,4 +10,5 @@
  */
 export type * from './models/Pedido.ts'
 export type * from './models/Evento.ts'
-export type * from './commonInputTypes.ts'
+export type * from './models/ProdutoPlataforma.ts'
+export type * from './commonInputTypes.ts'

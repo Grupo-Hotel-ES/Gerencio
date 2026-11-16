@@ -5,9 +5,9 @@
 
 import "dotenv/config";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomInt, randomUUID } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient, Prisma } from "../../src/generated/prisma/client.ts";
+import { PrismaClient, Prisma, type ProdutoPlataforma } from "../../src/generated/prisma/client.ts";
 import type { Plataforma, TipoPedido, EntreguePor, CanalEvento } from "../../src/generated/prisma/enums.ts";
 import { montarPedidoRappi, dispararWebhookNovoPedido as dispararWebhookRappi } from "../rappi/index.ts";
 import { montarPedidoIFood } from "../ifood/index.ts";
@@ -102,6 +102,36 @@ function normalizarPlataforma(valor: unknown): Plataforma | null {
   return mapa[chave] ?? null;
 }
 
+/** Identificador da plataforma usado pelo Gerêncio (MapeamentoApp) e pelas URLs do catálogo. */
+const ID_PUBLICO: Record<Plataforma, string> = {
+  IFOOD: "ifood",
+  NOVENTA_NOVE_FOOD: "99food",
+  KEETA: "keeta",
+  UBER_EATS: "ubereats",
+  RAPPI: "rappi",
+};
+
+const NOME_PLATAFORMA: Record<Plataforma, string> = {
+  IFOOD: "iFood",
+  NOVENTA_NOVE_FOOD: "99 Food",
+  KEETA: "Keeta",
+  UBER_EATS: "Uber Eats",
+  RAPPI: "Rappi",
+};
+
+const digitos = (n: number) => Array.from({ length: n }, () => randomInt(10)).join("");
+const sorteio = (alfabeto: string, n: number) => Array.from({ length: n }, () => alfabeto[randomInt(alfabeto.length)]).join("");
+const LETRAS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+/** Cada plataforma gera o ID do produto no seu próprio formato (curto, para ser copiado no Gerêncio). */
+const GERAR_ID_PRODUTO: Record<Plataforma, () => string> = {
+  IFOOD: () => `SKU-${digitos(3)}-${sorteio(LETRAS, 3)}`,
+  RAPPI: () => `${digitos(3)}-${digitos(3)}`,
+  UBER_EATS: () => `UE-${sorteio(LETRAS + "0123456789", 6)}`,
+  NOVENTA_NOVE_FOOD: () => `99-${digitos(6)}`,
+  KEETA: () => `KT${digitos(7)}`,
+};
+
 // ---------------------------------------------------------------------------
 // HTTP utilitários
 // ---------------------------------------------------------------------------
@@ -140,6 +170,197 @@ function exigirInteiroNaoNegativo(valor: unknown, campo: string): number {
   const n = Number(valor);
   if (!Number.isInteger(n) || n < 0) throw new ErroHttp(400, `"${campo}" deve ser um inteiro >= 0`);
   return n;
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo das plataformas (portal do restaurante)
+// ---------------------------------------------------------------------------
+
+function formatarProduto(produto: ProdutoPlataforma) {
+  return {
+    idExterno: produto.idExterno,
+    plataforma: ID_PUBLICO[produto.plataforma],
+    nome: produto.nome,
+    categoria: produto.categoria,
+    precoCentavos: produto.precoCentavos,
+    quantidade: produto.quantidade,
+    sincronizadoEm: produto.sincronizadoEm,
+    criadoEm: produto.criadoEm,
+    atualizadoEm: produto.atualizadoEm,
+  };
+}
+
+function exigirPlataforma(valor: unknown): Plataforma {
+  const plataforma = normalizarPlataforma(valor);
+  if (!plataforma) throw new ErroHttp(400, `Plataforma inválida: ${JSON.stringify(valor)}`);
+  return plataforma;
+}
+
+function exigirTexto(valor: unknown, campo: string, limite = 100): string {
+  if (typeof valor !== "string" || !valor.trim()) throw new ErroHttp(400, `"${campo}" é obrigatório`);
+  if (valor.trim().length > limite) throw new ErroHttp(400, `"${campo}" deve ter até ${limite} caracteres`);
+  return valor.trim();
+}
+
+/** Aceita precoCentavos (inteiro) ou preco em reais ("12,50", 12.5). */
+function lerPrecoCentavos(corpo: any): number {
+  if (corpo.precoCentavos !== undefined) return exigirInteiroNaoNegativo(corpo.precoCentavos, "precoCentavos");
+  const reais = Number(String(corpo.preco ?? "").replace(",", "."));
+  if (corpo.preco === undefined || corpo.preco === "" || !Number.isFinite(reais) || reais < 0) {
+    throw new ErroHttp(400, '"preco" deve ser um valor em reais maior ou igual a zero');
+  }
+  return Math.round(reais * 100);
+}
+
+function exigirQuantidade(valor: unknown): number {
+  const quantidade = exigirInteiroNaoNegativo(valor, "quantidade");
+  if (quantidade > 1_000_000) throw new ErroHttp(400, '"quantidade" deve ser no máximo 1.000.000');
+  return quantidade;
+}
+
+async function listarCatalogo(params: URLSearchParams) {
+  const plataforma = params.get("plataforma");
+  const produtos = await prisma.produtoPlataforma.findMany({
+    where: plataforma ? { plataforma: exigirPlataforma(plataforma) } : {},
+    orderBy: [{ plataforma: "asc" }, { nome: "asc" }],
+  });
+  return produtos.map(formatarProduto);
+}
+
+/** O restaurante cadastra o produto e a plataforma devolve o ID dele. */
+async function criarProdutoCatalogo(corpo: any) {
+  const plataforma = exigirPlataforma(corpo.plataforma);
+  const dados = {
+    plataforma,
+    nome: exigirTexto(corpo.nome, "nome"),
+    categoria: corpo.categoria === undefined || corpo.categoria === "" ? "Sem categoria" : exigirTexto(corpo.categoria, "categoria", 60),
+    precoCentavos: lerPrecoCentavos(corpo),
+    quantidade: exigirQuantidade(corpo.quantidade ?? 0),
+  };
+  // O ID sorteado pode colidir com um existente; a constraint única decide e um novo é sorteado.
+  for (let tentativa = 0; tentativa < 5; tentativa++) {
+    try {
+      return formatarProduto(await prisma.produtoPlataforma.create({ data: { ...dados, idExterno: GERAR_ID_PRODUTO[plataforma]() } }));
+    } catch (erro) {
+      if (!(erro instanceof Prisma.PrismaClientKnownRequestError && erro.code === "P2002")) throw erro;
+    }
+  }
+  throw new ErroHttp(503, "Não foi possível gerar um ID livre para o produto. Tente novamente");
+}
+
+async function buscarProdutoCatalogo(plataformaUrl: string, idExterno: string) {
+  const plataforma = exigirPlataforma(plataformaUrl);
+  const produto = await prisma.produtoPlataforma.findUnique({ where: { plataforma_idExterno: { plataforma, idExterno } } });
+  if (!produto) throw new ErroHttp(404, `Produto ${idExterno} não encontrado no ${NOME_PLATAFORMA[plataforma]}`);
+  return produto;
+}
+
+// Endereço do Gerêncio que recebe o estoque e o preço mudados no portal de um produto vinculado.
+const URL_CATALOGO_GERENCIO = process.env["GERENCIO_CATALOGO_URL"] ?? "http://localhost:3005/api/webhooks/catalogo";
+// Opcional: com o mesmo segredo nos dois lados, o aviso vai assinado (X-Plataforma-Assinatura)
+const SEGREDO_CATALOGO = process.env["CATALOGO_WEBHOOK_SECRET"];
+
+type RespostaGerencio = { vinculado: boolean; restaurado: boolean };
+
+/** Avisa o Gerêncio da mudança feita no portal. Sem vínculo por lá (404), o produto fica só da plataforma. */
+async function avisarGerencio(plataforma: Plataforma, idExterno: string, valores: { quantidade?: number; precoCentavos?: number }): Promise<RespostaGerencio> {
+  const corpo = JSON.stringify({ plataforma: ID_PUBLICO[plataforma], idExterno, ...valores });
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (SEGREDO_CATALOGO) {
+    const t = Math.floor(Date.now() / 1000);
+    headers["X-Plataforma-Assinatura"] = `t=${t},sign=${createHmac("sha256", SEGREDO_CATALOGO).update(`${t}.${corpo}`).digest("hex")}`;
+  }
+  let resposta: Response;
+  try {
+    resposta = await fetch(URL_CATALOGO_GERENCIO, { method: "POST", headers, body: corpo, signal: AbortSignal.timeout(5000) });
+  } catch {
+    throw new ErroHttp(502, "O Gerêncio não respondeu, então nada foi alterado. Tente de novo em instantes");
+  }
+  if (resposta.status === 404) return { vinculado: false, restaurado: false };
+  const dados = await resposta.json().catch(() => null) as { error?: string; restaurado?: boolean } | null;
+  if (!resposta.ok) throw new ErroHttp(502, `O Gerêncio recusou a alteração: ${dados?.error ?? `status ${resposta.status}`}`);
+  return { vinculado: true, restaurado: Boolean(dados?.restaurado) };
+}
+
+/**
+ * Edição pelo portal ou atualização enviada pelo Gerêncio (corpo com origem "gerencio").
+ * Num produto vinculado, estoque e preço mudados no portal vão primeiro para o Gerêncio, que atualiza o
+ * saldo dele e repassa a todas as plataformas vinculadas; se o Gerêncio não responder, nada muda.
+ */
+async function atualizarProdutoCatalogo(plataformaUrl: string, idExterno: string, corpo: any) {
+  const produto = await buscarProdutoCatalogo(plataformaUrl, idExterno);
+  const peloGerencio = corpo.origem === "gerencio";
+  const quantidade = corpo.quantidade !== undefined ? exigirQuantidade(corpo.quantidade) : undefined;
+  const precoCentavos = corpo.precoCentavos !== undefined || corpo.preco !== undefined ? lerPrecoCentavos(corpo) : undefined;
+  const mudancas = {
+    ...(quantidade !== undefined && quantidade !== produto.quantidade && { quantidade }),
+    ...(precoCentavos !== undefined && precoCentavos !== produto.precoCentavos && { precoCentavos }),
+  };
+  const gerencio = produto.sincronizadoEm && !peloGerencio && Object.keys(mudancas).length > 0
+    ? await avisarGerencio(produto.plataforma, produto.idExterno, mudancas)
+    : null;
+  const atualizado = await prisma.produtoPlataforma.update({
+    where: { id: produto.id },
+    data: {
+      ...(corpo.nome !== undefined && { nome: exigirTexto(corpo.nome, "nome") }),
+      ...(corpo.categoria !== undefined && { categoria: exigirTexto(corpo.categoria, "categoria", 60) }),
+      ...(precoCentavos !== undefined && { precoCentavos }),
+      ...(quantidade !== undefined && { quantidade }),
+      ...(peloGerencio && { sincronizadoEm: new Date() }),
+      // O Gerêncio não conhece mais este ID: a plataforma passa a controlar o produto sozinha.
+      ...(gerencio && !gerencio.vinculado && { sincronizadoEm: null }),
+    },
+  });
+  return { ...formatarProduto(atualizado), ...(gerencio && { gerencio }) };
+}
+
+/**
+ * O Gerêncio desfez o vínculo: o portal volta a controlar saldo e preço. Com zerarEstoque (produto
+ * apagado no Gerêncio), o produto fica indisponível até o restaurante repor unidades.
+ */
+async function desvincularProdutoCatalogo(plataformaUrl: string, idExterno: string, zerarEstoque: boolean) {
+  const produto = await buscarProdutoCatalogo(plataformaUrl, idExterno);
+  return formatarProduto(await prisma.produtoPlataforma.update({
+    where: { id: produto.id },
+    data: { sincronizadoEm: null, ...(zerarEstoque && { quantidade: 0 }) },
+  }));
+}
+
+async function removerProdutoCatalogo(plataformaUrl: string, idExterno: string) {
+  const produto = await buscarProdutoCatalogo(plataformaUrl, idExterno);
+  await prisma.produtoPlataforma.delete({ where: { id: produto.id } });
+}
+
+/**
+ * Itens que existem no cardápio da plataforma usam o nome e o preço cadastrados nela e
+ * precisam caber no estoque. Itens fora do cardápio (roteiros .http antigos) seguem como vieram.
+ */
+async function aplicarCatalogo(plataforma: Plataforma, itens: { codigoExterno: string; nome: string; quantidade: number; precoUnitarioCentavos: number }[]) {
+  const produtos = await prisma.produtoPlataforma.findMany({
+    where: { plataforma, idExterno: { in: itens.map((item) => item.codigoExterno) } },
+  });
+  const porCodigo = new Map(produtos.map((produto) => [produto.idExterno, produto]));
+  const pedidas = new Map<string, number>();
+  for (const item of itens) {
+    const produto = porCodigo.get(item.codigoExterno);
+    if (!produto) continue;
+    item.nome = produto.nome;
+    item.precoUnitarioCentavos = produto.precoCentavos;
+    pedidas.set(produto.id, (pedidas.get(produto.id) ?? 0) + item.quantidade);
+  }
+  const baixas = produtos
+    .filter((produto) => pedidas.has(produto.id))
+    .map((produto) => ({ produto, quantidade: pedidas.get(produto.id)! }));
+  for (const { produto, quantidade } of baixas) {
+    if (quantidade > produto.quantidade) throw erroAcimaDoEstoque(plataforma, produto.nome, produto.quantidade);
+  }
+  return baixas;
+}
+
+function erroAcimaDoEstoque(plataforma: Plataforma, nome: string, disponivel: number) {
+  if (disponivel === 0) return new ErroHttp(409, `${nome} está indisponível no ${NOME_PLATAFORMA[plataforma]}`);
+  const unidades = disponivel === 1 ? "1 unidade disponível" : `${disponivel} unidades disponíveis`;
+  return new ErroHttp(409, `Acima do limite do estoque: ${nome} tem ${unidades} no ${NOME_PLATAFORMA[plataforma]}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +409,9 @@ async function criarPedido(corpo: any) {
       complementos: item.complementos ?? [],
     };
   });
+
+  // Produtos do cardápio da plataforma: nome e preço vêm do cadastro e o estoque precisa ser suficiente
+  const baixas = await aplicarCatalogo(plataforma, itens);
 
   const subtotalCentavos = itens.reduce((s, it) => s + it.quantidade * it.precoUnitarioCentavos, 0);
   const taxaEntregaCentavos = tipo === "ENTREGA" ? exigirInteiroNaoNegativo(corpo.taxaEntregaCentavos ?? 0, "taxaEntregaCentavos") : 0;
@@ -263,21 +487,35 @@ const payloadEvento = pedidoRappi
   ? montarEventoNovoPedido99Food(pedido99)
   : { tipo: config.tipoEventoNovoPedido, pedidoId: idExterno, lojaId: lojaIdExterno, criadoEm: agora.toISOString() };
   
-  const pedido = await prisma.pedido.create({
-    data: {
-      ...dadosPedido,
-      endereco,
-      payload: payload as Prisma.InputJsonValue,
-      eventos: {
-        create: {
-          plataforma,
-          tipo: config.tipoEventoNovoPedido,
-          canal: config.canal,
-          payload: payloadEvento as Prisma.InputJsonValue,
+  // O pedido pago no app desconta o estoque da própria plataforma na mesma transação.
+  // As outras plataformas recebem o novo saldo pelo Gerêncio, quando o restaurante aceita o pedido.
+  const pedido = await prisma.$transaction(async (tx) => {
+    for (const { produto, quantidade } of baixas) {
+      const baixa = await tx.produtoPlataforma.updateMany({
+        where: { id: produto.id, quantidade: { gte: quantidade } },
+        data: { quantidade: { decrement: quantidade } },
+      });
+      if (baixa.count !== 1) {
+        const atual = await tx.produtoPlataforma.findUnique({ where: { id: produto.id } });
+        throw erroAcimaDoEstoque(plataforma, produto.nome, atual?.quantidade ?? 0);
+      }
+    }
+    return tx.pedido.create({
+      data: {
+        ...dadosPedido,
+        endereco,
+        payload: payload as Prisma.InputJsonValue,
+        eventos: {
+          create: {
+            plataforma,
+            tipo: config.tipoEventoNovoPedido,
+            canal: config.canal,
+            payload: payloadEvento as Prisma.InputJsonValue,
+          },
         },
       },
-    },
-    include: { eventos: true },
+      include: { eventos: true },
+    });
   });
 
   if (pedidoRappi) void notificarWebhookRappi(pedido.eventos[0]!.id, pedidoRappi);
@@ -499,6 +737,27 @@ async function rotear(req: IncomingMessage, res: ServerResponse) {
   }
 
   // ---------------------------------------------------------------------------
+  // Catálogo de cada plataforma (portal do restaurante, cardápio do cliente e sincronização do Gerêncio)
+  // ---------------------------------------------------------------------------
+  if (pathname === "/catalogo") {
+    if (metodo === "GET") return enviarJson(res, 200, await listarCatalogo(searchParams));
+    if (metodo === "POST") return enviarJson(res, 201, await criarProdutoCatalogo(await lerCorpo(req)));
+  }
+  if ((m = pathname.match(/^\/catalogo\/([^/]+)\/([^/]+)\/vinculo$/)) && metodo === "DELETE") {
+    const zerarEstoque = searchParams.get("zerarEstoque") === "1";
+    return enviarJson(res, 200, await desvincularProdutoCatalogo(decodeURIComponent(m[1]!), decodeURIComponent(m[2]!), zerarEstoque));
+  }
+  if ((m = pathname.match(/^\/catalogo\/([^/]+)\/([^/]+)$/))) {
+    const [plataformaUrl, idExterno] = [decodeURIComponent(m[1]!), decodeURIComponent(m[2]!)];
+    if (metodo === "GET") return enviarJson(res, 200, formatarProduto(await buscarProdutoCatalogo(plataformaUrl, idExterno)));
+    if (metodo === "PATCH") return enviarJson(res, 200, await atualizarProdutoCatalogo(plataformaUrl, idExterno, await lerCorpo(req)));
+    if (metodo === "DELETE") {
+      await removerProdutoCatalogo(plataformaUrl, idExterno);
+      return enviarJson(res, 204);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Endpoints da API iFood Merchant v1.0 (Polling)
   // ---------------------------------------------------------------------------
   if (pathname === "/v1.0/events:poll" && metodo === "GET") {
@@ -689,4 +948,4 @@ async function encerrar() {
   process.exit(0);
 }
 process.on("SIGINT", encerrar);
-process.on("SIGTERM", encerrar);
+process.on("SIGTERM", encerrar);

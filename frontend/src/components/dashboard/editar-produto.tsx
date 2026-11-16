@@ -6,6 +6,8 @@ import { Botao, Cartao, Divisor, Etiqueta, Texto } from './ui';
 import { Espacamento, Raio } from '@/constants/tokens';
 import { PLATAFORMAS_DELIVERY } from '@/data/estoque';
 import { useCores } from '@/hooks/use-cores';
+import { ErroApi } from '@/services/http';
+import { consultarProdutoNaPlataforma } from '@/services/api-integracao';
 import {
   atualizarProduto,
   criarMapeamento,
@@ -21,7 +23,7 @@ type Mensagem = { secao: Secao; texto: string; erro: boolean };
 // Mapeamentos antigos podem estar gravados como "IFOOD" ou "Uber Eats".
 const mesmaPlataforma = (gravada: string, id: string) => gravada.toLowerCase().replace(/[\s_-]+/g, '') === id;
 
-/** Edita os dados do produto, os códigos dele em cada plataforma e permite excluí-lo. */
+/** Edita os dados do produto, os IDs dele em cada plataforma e permite excluí-lo. */
 export function FormularioEdicaoProduto({ produto, mapeamentos, onAlterado, onExcluido, onFechar }: {
   produto: Produto;
   mapeamentos: Mapeamento[];
@@ -57,22 +59,25 @@ export function FormularioEdicaoProduto({ produto, mapeamentos, onAlterado, onEx
     }
     await atualizarProduto(produto.id, { nome: nome.trim(), categoria: categoria.trim(), preco: valor });
     await onAlterado();
-    return 'Dados do produto salvos.';
+    return 'Dados do produto salvos. O novo preço será enviado às plataformas vinculadas.';
   });
 
   const adicionarCodigo = (plataforma: string, nomePlataforma: string) => executar('codigos', async () => {
     const codigo = (codigos[plataforma] ?? '').trim();
-    if (!codigo) throw new Error(`Informe o código do produto no ${nomePlataforma}.`);
+    if (!codigo) throw new Error(`Informe o ID do produto no ${nomePlataforma}.`);
+    // Um ID que não existe na plataforma não é vinculado; se ela não responder, o vínculo segue.
+    try { await consultarProdutoNaPlataforma(plataforma, codigo); }
+    catch (e) { if (e instanceof ErroApi && e.status === 404) throw e; }
     await criarMapeamento({ produtoId: produto.id, plataforma, idExternoApp: codigo });
     setCodigos((atuais) => ({ ...atuais, [plataforma]: '' }));
     await onAlterado();
-    return `Código ${codigo} ligado ao ${nomePlataforma}.`;
+    return `ID ${codigo} vinculado ao ${nomePlataforma}. O estoque e o preço daqui serão enviados para lá.`;
   });
 
   const removerCodigo = (mapeamento: Mapeamento, nomePlataforma: string) => executar('codigos', async () => {
     await removerMapeamento(mapeamento.id);
     await onAlterado();
-    return `Código removido do ${nomePlataforma}.`;
+    return `Vínculo com o ${nomePlataforma} removido. A plataforma volta a controlar o próprio estoque desse produto.`;
   });
 
   const excluir = () => executar('exclusao', async () => {
@@ -108,9 +113,9 @@ export function FormularioEdicaoProduto({ produto, mapeamentos, onAlterado, onEx
     <Divisor />
 
     <View style={styles.titulo}>
-      <Texto tamanho={16} peso={600}>Códigos nas plataformas</Texto>
+      <Texto tamanho={16} peso={600}>IDs nas plataformas</Texto>
       <Texto cor="textoSecundario">
-        Cada aplicativo identifica o produto por um código próprio (SKU). Os pedidos que chegam com esse código são ligados a este produto e baixam o estoque dele.
+        Cada plataforma gera um ID para o produto quando ele é cadastrado nela. Com o ID vinculado, os pedidos de lá baixam este estoque e o saldo e o preço daqui são enviados para lá.
       </Texto>
     </View>
     {PLATAFORMAS_DELIVERY.map(({ id, nome: nomePlataforma }) => {
@@ -120,15 +125,15 @@ export function FormularioEdicaoProduto({ produto, mapeamentos, onAlterado, onEx
         {/* Código e botão ficam juntos; em telas estreitas descem abaixo do nome. */}
         <View style={styles.acoesPlataforma}>{mapeamento ? <>
           <Etiqueta rotulo={mapeamento.idExternoApp} corPonto={cores.statusEntregue} />
-          <Botao rotulo="Remover" accessibilityLabel={`Remover código do ${nomePlataforma}`} disabled={salvando}
+          <Botao rotulo="Desvincular" accessibilityLabel={`Desvincular ${nomePlataforma}`} disabled={salvando}
             onPress={() => removerCodigo(mapeamento, nomePlataforma)} />
         </> : <>
-          <TextInput accessibilityLabel={`Código no ${nomePlataforma}`} placeholder="Sem código" placeholderTextColor={cores.textoSecundario}
+          <TextInput accessibilityLabel={`ID no ${nomePlataforma}`} placeholder="Sem vínculo" placeholderTextColor={cores.textoSecundario}
             value={codigos[id] ?? ''} editable={!salvando} autoCapitalize="none" autoCorrect={false}
             onChangeText={(texto) => setCodigos((atuais) => ({ ...atuais, [id]: texto }))}
             onSubmitEditing={() => adicionarCodigo(id, nomePlataforma)}
             style={[styles.codigo, { color: cores.textoPrincipal, borderColor: cores.borda, backgroundColor: cores.superficie }]} />
-          <Botao rotulo="Adicionar" icone="mais" accessibilityLabel={`Adicionar código do ${nomePlataforma}`} disabled={salvando}
+          <Botao rotulo="Vincular" icone="mais" accessibilityLabel={`Vincular ID do ${nomePlataforma}`} disabled={salvando}
             onPress={() => adicionarCodigo(id, nomePlataforma)} />
         </>}</View>
       </View>;
@@ -138,7 +143,7 @@ export function FormularioEdicaoProduto({ produto, mapeamentos, onAlterado, onEx
     <Divisor />
 
     {confirmarExclusao ? <View style={styles.titulo}>
-      <Texto peso={500}>Excluir {produto.nome}? Os códigos nas plataformas também serão apagados. Produtos que já aparecem em pedidos não podem ser excluídos.</Texto>
+      <Texto peso={500}>Excluir {produto.nome}? Ele sai do estoque e fica indisponível nas plataformas vinculadas, sem sumir delas. Pedidos antigos e relatórios continuam com ele. Se o restaurante repuser unidades no portal de uma plataforma, ele volta ao estoque.</Texto>
       <View style={styles.linha}>
         <Botao rotulo={salvando ? 'Excluindo…' : 'Confirmar exclusão'} disabled={salvando} onPress={excluir} />
         <Botao rotulo="Manter produto" disabled={salvando} onPress={() => { setConfirmarExclusao(false); setMensagem(null); }} />

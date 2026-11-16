@@ -2,14 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 
 import { FormularioEdicaoProduto } from '@/components/dashboard/editar-produto';
-import { FormularioProduto } from '@/components/dashboard/novo-produto';
 import { Campo } from '@/components/dashboard/formularios';
+import { FormularioVinculo } from '@/components/dashboard/vincular-produto';
 import { CartaoResumo, Grade, Pagina, useLarguraConteudo } from '@/components/dashboard/pagina';
 import { Aviso, Botao, Cartao, Chip, Divisor, Etiqueta, Texto } from '@/components/dashboard/ui';
 import { Espacamento, Raio } from '@/constants/tokens';
 import { PLATAFORMAS_DELIVERY } from '@/data/estoque';
 import { formatarHora, formatarReais } from '@/data/pedidos';
 import { useCores } from '@/hooks/use-cores';
+import { consultarSincronizacao, sincronizarAgora, type SituacaoSincronizacao } from '@/services/api-integracao';
 import {
   listarMapeamentos, listarProdutos, salvarEstoque, type Mapeamento, type Produto,
 } from '@/services/api-produtos';
@@ -20,10 +21,29 @@ const FILTROS: { id: Filtro; rotulo: string }[] = [
   { id: 'todos', rotulo: 'Todos' }, { id: 'disponiveis', rotulo: 'Disponíveis' }, { id: 'esgotados', rotulo: 'Esgotados' },
 ];
 
-/** Nomes das plataformas em que o produto tem código, na ordem de PLATAFORMAS_DELIVERY. */
-function plataformasComCodigo(mapeamentos: Mapeamento[]) {
-  const gravadas = mapeamentos.map((m) => m.plataforma.toLowerCase().replace(/[\s_-]+/g, ''));
+const normalizar = (plataforma: string) => plataforma.toLowerCase().replace(/[\s_-]+/g, '');
+const nomeDaPlataforma = (plataforma: string) =>
+  PLATAFORMAS_DELIVERY.find(({ id }) => id === normalizar(plataforma))?.nome ?? plataforma;
+
+/** Nomes das plataformas vinculadas ao produto, na ordem de PLATAFORMAS_DELIVERY. */
+function plataformasVinculadas(mapeamentos: Mapeamento[]) {
+  const gravadas = mapeamentos.map((m) => normalizar(m.plataforma));
   return PLATAFORMAS_DELIVERY.filter(({ id }) => gravadas.includes(id)).map(({ nome }) => nome);
+}
+
+/** Texto e cor da situação do envio de estoque e preço para as plataformas vinculadas. */
+function descreverSincronizacao(produto: Produto, mapeamentos: Mapeamento[], situacao: SituacaoSincronizacao | null) {
+  if (mapeamentos.length === 0) return { texto: 'Sem vínculo com plataformas de delivery', erro: false };
+  if (!situacao) return { texto: 'Situação da sincronização indisponível', erro: false };
+  const vinculos = mapeamentos.map((m) => situacao.vinculos.find((v) => v.mapeamentoId === m.id));
+  const falha = vinculos.find((v) => v?.erro);
+  if (falha) return { texto: `Falha ao sincronizar com ${nomeDaPlataforma(falha.plataforma)}: ${falha.erro}`, erro: true };
+  if (vinculos.some((v) => !v?.sincronizadoEm || v.quantidadeEnviada === null)) return { texto: 'Sincronizando com as plataformas…', erro: false };
+  const enviada = vinculos[0]!.quantidadeEnviada!;
+  const reservadas = situacao.reservas.find((r) => r.produtoId === produto.id)?.quantidade ?? 0;
+  const ultimo = vinculos.map((v) => new Date(v!.sincronizadoEm!)).sort((a, b) => b.getTime() - a.getTime())[0]!;
+  const reserva = reservadas > 0 ? ` (${reservadas} reservada${reservadas === 1 ? '' : 's'} em pedidos ainda não aceitos)` : '';
+  return { texto: `Nas plataformas: ${enviada} un.${reserva} • sincronizado às ${formatarHora(ultimo)}`, erro: false };
 }
 
 export default function GestaoDeEstoque() {
@@ -31,6 +51,9 @@ export default function GestaoDeEstoque() {
   const largura = useLarguraConteudo();
   const [produtos, setProdutos] = useState<Produto[] | null>(null);
   const [mapeamentos, setMapeamentos] = useState<Mapeamento[]>([]);
+  const [situacao, setSituacao] = useState<SituacaoSincronizacao | null>(null);
+  const [sincronizando, setSincronizando] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
   const [editando, setEditando] = useState<number | null>(null);
   const [rascunhos, setRascunhos] = useState<Record<number, Rascunho>>({});
   const [filtro, setFiltro] = useState<Filtro>('todos');
@@ -45,9 +68,12 @@ export default function GestaoDeEstoque() {
   const carregar = useCallback(async () => {
     const versao = ++consulta.current;
     try {
-      const [dados, codigos] = await Promise.all([listarProdutos(), listarMapeamentos()]);
+      // A página funciona mesmo com a api-integracao fora do ar; só a situação da sincronização some.
+      const [dados, codigos, sincronizacao] = await Promise.all([
+        listarProdutos(), listarMapeamentos(), consultarSincronizacao().catch(() => null),
+      ]);
       if (versao !== consulta.current) return;
-      setProdutos(dados); setMapeamentos(codigos); setAtualizadoEm(new Date()); setErro(null);
+      setProdutos(dados); setMapeamentos(codigos); setSituacao(sincronizacao); setAtualizadoEm(new Date()); setErro(null);
     } catch (e) { if (versao === consulta.current) setErro((e as Error).message); }
   }, []);
 
@@ -61,9 +87,16 @@ export default function GestaoDeEstoque() {
   // Durante a edição, a versão original acompanha o rascunho até o servidor confirmar o ajuste.
   useEffect(() => {
     if (pendentes || salvando) return;
-    const intervalo = setInterval(carregar, 10_000);
+    const intervalo = setInterval(carregar, 5_000);
     return () => clearInterval(intervalo);
   }, [carregar, pendentes, salvando]);
+
+  const sincronizar = async () => {
+    setSincronizando(true); setErro(null);
+    try { setSituacao(await sincronizarAgora()); await carregar(); setAviso('Estoque e preços reenviados às plataformas vinculadas.'); }
+    catch (e) { setErro((e as Error).message); }
+    finally { setSincronizando(false); }
+  };
 
   const editar = (produto: Produto, valor: string) => {
     setRascunhos((atuais) => {
@@ -98,15 +131,16 @@ export default function GestaoDeEstoque() {
 
   return (
     <Pagina titulo="Gestão de estoque" subtitulo="Consulte o saldo real e ajuste as unidades disponíveis para venda."
-      acao={<Botao rotulo="Cadastrar produto" icone="mais" variante="primario" disabled={salvando || pendentes > 0} onPress={() => setNovoProduto(true)} />}>
-      {novoProduto && <FormularioProduto
-        onFechar={() => setNovoProduto(false)} onConcluir={(produtoId) => {
-          // Abre a edição do produto novo para cadastrar os códigos nas plataformas.
-          setNovoProduto(false); setFiltro('todos'); setBusca(''); setEditando(produtoId);
+      acao={<Botao rotulo="Vincular produto" icone="mais" variante="primario" disabled={salvando || pendentes > 0} onPress={() => { setNovoProduto(true); setAviso(null); }} />}>
+      {novoProduto && <FormularioVinculo
+        onFechar={() => setNovoProduto(false)} onConcluir={() => {
+          setNovoProduto(false); setFiltro('todos'); setBusca('');
+          setAviso('Produto vinculado. O estoque e o preço serão enviados às plataformas em instantes.');
           carregar();
         }} />}
+      {aviso && <Aviso icone="sincronizar" titulo="Sincronização" texto={aviso} />}
       <Grade colunas={largura >= 900 ? 3 : 1}>
-        <CartaoResumo rotulo="Produtos cadastrados" valor={produtos ? lista.length : '—'} detalhe="Catálogo salvo no Gerôncio" />
+        <CartaoResumo rotulo="Produtos vinculados" valor={produtos ? lista.length : '—'} detalhe="Estoque único para todas as plataformas" />
         <CartaoResumo rotulo="Disponíveis" valor={produtos ? disponiveis : '—'} detalhe={contagem.esgotados + ' produtos com saldo zero'} />
         <CartaoResumo rotulo="Ajustes pendentes" valor={pendentes} detalhe="Alterações ainda não salvas" />
       </Grade>
@@ -118,6 +152,8 @@ export default function GestaoDeEstoque() {
           <Texto cor="textoSecundario">{atualizadoEm ? 'Atualizado às ' + formatarHora(atualizadoEm) : 'Aguardando dados'}</Texto>
           <Botao rotulo={pendentes ? 'Descartar ajustes e recarregar' : 'Atualizar'} icone="sincronizar" disabled={salvando}
             onPress={() => { setRascunhos({}); carregar(); }} />
+          <Botao rotulo={sincronizando ? 'Sincronizando…' : 'Sincronizar agora'} icone="sincronizar" disabled={sincronizando || salvando}
+            onPress={sincronizar} />
         </View>
         <Campo rotulo="Buscar produto" value={busca} onChangeText={setBusca} placeholder="Nome do produto" />
         <View style={styles.linha}>
@@ -127,14 +163,16 @@ export default function GestaoDeEstoque() {
           const rascunho = rascunhos[p.id];
           const valor = rascunho?.valor ?? String(p.quantidade);
           const codigosDoProduto = mapeamentos.filter((m) => m.produtoId === p.id);
-          const comCodigo = plataformasComCodigo(codigosDoProduto);
+          const vinculadas = plataformasVinculadas(codigosDoProduto);
+          const sincronizacao = descreverSincronizacao(p, codigosDoProduto, situacao);
           return <View key={p.id} style={styles.bloco}>
             <View style={styles.linha}>
               <View style={styles.produto}>
                 <Texto tamanho={16} peso={600}>{p.nome}</Texto>
                 <Texto cor="textoSecundario">{p.categoria} • {formatarReais(p.preco)}</Texto>
                 <Texto cor="textoSecundario">Salvo: {p.quantidade} un.{rascunho ? ' • Ajuste pendente' : ''}</Texto>
-                <Texto cor="textoSecundario">{comCodigo.length ? 'Código em: ' + comCodigo.join(', ') : 'Sem código nas plataformas de delivery'}</Texto>
+                {vinculadas.length > 0 && <Texto cor="textoSecundario">Vinculado a: {vinculadas.join(', ')}</Texto>}
+                <Texto cor={sincronizacao.erro ? 'feedbackErro' : 'textoSecundario'}>{sincronizacao.texto}</Texto>
               </View>
               <View style={styles.linha}>
                 <Botao rotulo="−" accessibilityLabel={'Diminuir ' + p.nome} disabled={salvando || novoProduto || Number(valor) <= 0}
@@ -151,6 +189,7 @@ export default function GestaoDeEstoque() {
             {editando === p.id && <FormularioEdicaoProduto produto={p} mapeamentos={codigosDoProduto} onAlterado={carregar}
               onFechar={() => setEditando(null)} onExcluido={() => {
                 setEditando(null);
+                setAviso(p.nome + ' saiu do estoque e ficou indisponível nas plataformas vinculadas. Ele continua nos pedidos antigos e nos relatórios.');
                 setRascunhos((atuais) => { const novos = { ...atuais }; delete novos[p.id]; return novos; });
                 carregar();
               }} />}
@@ -160,8 +199,8 @@ export default function GestaoDeEstoque() {
         {visiveis.length === 0 && <Texto cor="textoSecundario">{produtos === null ? (erro ? 'Estoque indisponível.' : 'Carregando estoque…') : 'Nenhum produto encontrado.'}</Texto>}
         <Botao rotulo={salvando ? 'Salvando…' : 'Salvar ajustes'} icone="salvar" variante="primario" disabled={!pendentes || salvando} onPress={salvar} />
       </Cartao>
-      <Aviso icone="info" titulo="Estoque local do restaurante"
-        texto="Ao aceitar um pedido, as unidades são reservadas. Cancelamentos antes da saída devolvem essa reserva. O envio do saldo para os aplicativos de delivery ainda não está disponível." />
+      <Aviso icone="info" titulo="Estoque sincronizado com as plataformas"
+        texto="O saldo e o preço daqui valem para todas as plataformas vinculadas e para o WhatsApp. Um pedido pago numa plataforma reserva as unidades em todas elas; o aceite baixa o estoque e o cancelamento devolve. Ajustes e mudanças de preço chegam às plataformas em poucos segundos, e o que for mudado no portal de uma plataforma volta para cá e segue para as outras. Produto com saldo zero aparece como indisponível." />
     </Pagina>
   );
 }

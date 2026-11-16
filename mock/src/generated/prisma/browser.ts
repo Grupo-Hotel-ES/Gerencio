@@ -27,3 +27,9 @@ export type Pedido = Prisma.PedidoModel
  * 
  */
 export type Evento = Prisma.EventoModel
+/**
+ * Model ProdutoPlataforma
+ * Produto do cardápio de uma plataforma, cadastrado pelo restaurante no portal de parceiros
+ * (página /restaurante do mock_frontend). O cardápio do cliente é lido daqui.
+ */
+export type ProdutoPlataforma = Prisma.ProdutoPlataformaModel

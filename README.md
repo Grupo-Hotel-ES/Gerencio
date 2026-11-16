@@ -246,6 +246,7 @@ EXPO_PUBLIC_API_PEDIDOS_URL=https://geroncio.exemplo.com/svc/pedidos/api
 EXPO_PUBLIC_API_PRODUTOS_URL=https://geroncio.exemplo.com/svc/produtos
 EXPO_PUBLIC_API_RESTAURANTES_URL=https://geroncio.exemplo.com/svc/restaurantes/api
 EXPO_PUBLIC_API_PAGAMENTOS_URL=https://geroncio.exemplo.com/svc/pagamentos/api
+EXPO_PUBLIC_API_INTEGRACAO_URL=https://geroncio.exemplo.com/svc/integracao/api
 EXPO_PUBLIC_URL_RETORNO_PAGAMENTO=https://geroncio.exemplo.com/assinatura/pagamento
 ```
 
@@ -301,6 +302,7 @@ server {
     location /svc/restaurantes/ { proxy_pass http://127.0.0.1:3003/; include /etc/nginx/proxy_geroncio.conf; }
     location /svc/produtos/     { proxy_pass http://127.0.0.1:3004/; include /etc/nginx/proxy_geroncio.conf; }
     location /svc/pagamentos/   { proxy_pass http://127.0.0.1:3006/; include /etc/nginx/proxy_geroncio.conf; }
+    location /svc/integracao/   { proxy_pass http://127.0.0.1:3005/; include /etc/nginx/proxy_geroncio.conf; }
 }
 ```
 
