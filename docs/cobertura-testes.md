@@ -24,13 +24,15 @@ Esta entrega é uma base simples de regressão, não cobertura integral dos flux
 
 ## Plano de ampliação após o PR #47
 
+Na preparação de conciliação de 16/11/2026, foram aprovadas e acrescentadas três regressões de ganhos e repasses: cálculo de 50% com cliente cadastrado, preservação do valor histórico após mudar o percentual e quitação individual seguida de lote sem novo pagamento. A suíte completa passou com 31 testes (30 cenários e um agregador legado). Veja [a conciliação do PR #47](conciliacao-pr-47.md). Isso não representa cobertura completa da funcionalidade financeira.
+
 Decisão do responsável em 09/11/2026: estabilizar e integrar primeiro o PR #46; em seguida integrar o PR #47; depois ampliar os testes para todas as partes do projeto. A suíte atual deve continuar executando durante essa sequência. Os itens abaixo são um plano, não cobertura já entregue nem aprovação antecipada de cada comportamento.
 
 | Parte | Cobertura a planejar após o PR #47 |
 | --- | --- |
 | Restaurantes, clientes e funcionários | CRUD, validações, vínculos, isolamento entre restaurantes e efeitos de exclusões |
 | Produtos, estoque e pedidos | Complementar as regressões existentes com limites, falhas, transações e transições de status |
-| Frete e rotas | Cálculo, seleção/ordem das paradas, exportação, limites e efeitos nos pedidos, conforme o contrato final do PR #47 |
+| Frete e rotas | Cálculo, seleção/ordem das paradas, exportação, limites e efeitos nos pedidos |
 | Pagamentos e assinaturas | Emissão/reutilização de links, consulta, falhas externas e eventos conflitantes; acesso por assinatura quando houver modelo e regra aprovados |
 | Plataformas de delivery | Assinaturas, recebimento durável, conversão, mapeamento, reprocessamento e processamento completo |
 | Relatórios | Filtros, períodos, agregações e valores financeiros |
