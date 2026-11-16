@@ -4,7 +4,7 @@ import { nomeDoCanal, requisitar } from './api-pedidos';
 /** Pedido no formato devolvido pela api-pedidos (só o que a rota usa). */
 type PedidoApi = {
   id: number;
-  nomeCliente: string | null;
+  cliente: { nomeCliente: string } | null;
   app: string;
   enderecoDestino: string;
   cepDestino: string;
@@ -23,7 +23,7 @@ export async function listarPedidosParaRota(): Promise<Parada[]> {
     .sort((a, b) => a.id - b.id)
     .map((p) => ({
       id: p.id,
-      cliente: p.nomeCliente ?? 'Cliente não identificado',
+      cliente: p.cliente?.nomeCliente ?? 'Cliente não identificado',
       endereco: p.enderecoDestino,
       complemento: `CEP ${formatarCep(p.cepDestino)} • ${nomeDoCanal(p.app)}`,
     }));

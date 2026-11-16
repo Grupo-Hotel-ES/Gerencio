@@ -6,8 +6,11 @@ import { Botao, Cartao, Chip, Divisor, Etiqueta, Texto } from '@/components/dash
 import { Fonts } from '@/constants/theme';
 import { Espacamento, Raio } from '@/constants/tokens';
 import { formatarReais } from '@/data/pedidos';
+import { usePerfil } from '@/data/perfil-context';
+import { gerarHtmlRelatorio, nomeArquivoRelatorio } from '@/data/relatorio-html';
 import { useCores } from '@/hooks/use-cores';
 import { buscarRelatorioVendas, type RelatorioVendas } from '@/services/api-relatorios';
+import { exportarPdf } from '@/services/exportar-pdf';
 
 type PeriodoId = 'hoje' | '7dias' | 'mes' | 'personalizado';
 type Intervalo = { inicio: Date; fim: Date };
@@ -66,6 +69,9 @@ export default function Relatorios() {
   const [hoje, setHoje] = useState<Date | null>(null);
   const [relatorio, setRelatorio] = useState<RelatorioVendas | null>(null);
   const [erro, setErro] = useState(false);
+  const { restaurante } = usePerfil();
+  const [exportando, setExportando] = useState(false);
+  const [erroExportar, setErroExportar] = useState<string | null>(null);
 
   useEffect(() => {
     const agora = new Date();
@@ -100,6 +106,23 @@ export default function Relatorios() {
   }, [inicioMs, fimMs]);
 
   const descricao = intervalo ? descreverIntervalo(intervalo) : 'Escolha as datas';
+
+  // Exporta o relatório que está na tela (mesmo período e dados) em PDF
+  const exportar = async () => {
+    if (!relatorio || !intervalo || exportando) return;
+    setExportando(true); setErroExportar(null);
+    try {
+      const html = gerarHtmlRelatorio(
+        { relatorio, periodo: descricao, restaurante: restaurante?.nome ?? 'Gerôncio', geradoEm: new Date() },
+        nomeArquivoRelatorio(intervalo.inicio, intervalo.fim),
+      );
+      await exportarPdf(html);
+    } catch (e) {
+      setErroExportar((e as Error).message || 'Não foi possível exportar o relatório.');
+    } finally {
+      setExportando(false);
+    }
+  };
   const campo = [styles.campo, { borderColor: cores.borda, backgroundColor: cores.superficie }];
 
   let mensagem: string | null = null;
@@ -113,7 +136,20 @@ export default function Relatorios() {
     <Pagina
       titulo="Relatórios"
       subtitulo="Entenda suas vendas e prepare a operação dos próximos dias."
-      acao={<Botao rotulo="Exportar relatório" icone="baixar" />}>
+      acao={
+        <Botao
+          rotulo={exportando ? 'Exportando…' : 'Exportar PDF'}
+          icone="baixar"
+          accessibilityHint="Gera um PDF com o relatório do período selecionado"
+          disabled={!relatorio || exportando}
+          onPress={exportar}
+        />
+      }>
+      {erroExportar && (
+        <Cartao style={[styles.vazio, { borderColor: cores.feedbackErro }]}>
+          <Texto accessibilityRole="alert">{erroExportar}</Texto>
+        </Cartao>
+      )}
       <View style={styles.barra}>
         <View style={styles.periodos}>
           {PERIODOS.map(({ id, rotulo }) => (

@@ -2,12 +2,16 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
+import Restaurante from './Restaurante';
 import reportWebVitals from './reportWebVitals';
+
+// Dois "apps" no mesmo mock: / é o cliente pedindo comida e /restaurante é o portal de parceiro
+const Pagina = window.location.pathname.startsWith('/restaurante') ? Restaurante : App;
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-    <App />
+    <Pagina />
   </React.StrictMode>
 );
 

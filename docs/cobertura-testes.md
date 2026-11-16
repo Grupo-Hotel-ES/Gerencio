@@ -24,13 +24,15 @@ Esta entrega é uma base simples de regressão, não cobertura integral dos flux
 
 ## Plano de ampliação após o PR #47
 
+Na preparação de conciliação de 16/11/2026, foram aprovadas e acrescentadas três regressões de ganhos e repasses: cálculo de 50% com cliente cadastrado, preservação do valor histórico após mudar o percentual e quitação individual seguida de lote sem novo pagamento. A suíte completa passou com 31 testes (30 cenários e um agregador legado). Veja [a conciliação do PR #47](conciliacao-pr-47.md). Isso não representa cobertura completa da funcionalidade financeira.
+
 Decisão do responsável em 09/11/2026: estabilizar e integrar primeiro o PR #46; em seguida integrar o PR #47; depois ampliar os testes para todas as partes do projeto. A suíte atual deve continuar executando durante essa sequência. Os itens abaixo são um plano, não cobertura já entregue nem aprovação antecipada de cada comportamento.
 
 | Parte | Cobertura a planejar após o PR #47 |
 | --- | --- |
 | Restaurantes, clientes e funcionários | CRUD, validações, vínculos, isolamento entre restaurantes e efeitos de exclusões |
 | Produtos, estoque e pedidos | Complementar as regressões existentes com limites, falhas, transações e transições de status |
-| Frete e rotas | Cálculo, seleção/ordem das paradas, exportação, limites e efeitos nos pedidos, conforme o contrato final do PR #47 |
+| Frete e rotas | Cálculo, seleção/ordem das paradas, exportação, limites e efeitos nos pedidos |
 | Pagamentos e assinaturas | Emissão/reutilização de links, consulta, falhas externas e eventos conflitantes; acesso por assinatura quando houver modelo e regra aprovados |
 | Plataformas de delivery | Assinaturas, recebimento durável, conversão, mapeamento, reprocessamento e processamento completo |
 | Relatórios | Filtros, períodos, agregações e valores financeiros |
@@ -70,6 +72,20 @@ describe "Pagamento de pedido"
 Implementação: `backend/testes/fluxos-criticos.test.ts`. As pré-condições são cadastradas pelas APIs de restaurantes, produtos e pedidos; o registro de um link pendente é uma fixture Prisma. Nenhum pagamento real é feito. Os testes não exercitam o envio de WhatsApp, pois os pedidos usados são de balcão.
 
 Os onze cenários em `backend/testes/pedidos-estoque.test.ts` foram mantidos, com todas as asserções de negócio originais. Foram acrescentadas a validação de ambiente antes das importações e as verificações de disponibilidade das URLs das APIs para a checagem de tipos. O cenário legado que usa um adapter simulado continua identificado como cobertura parcial, não como request spec completo.
+
+## Cliente do pedido (aprovados em 09/11/2026)
+
+```text
+describe "Cliente do pedido"
+  it "quando o pedido traz um cliente novo, então o cliente é cadastrado e o pedido aponta para ele"
+  it "quando o nome e o endereço já existem, com maiúsculas diferentes, então o cadastro existente é reaproveitado"
+  it "quando o pedido traz um clienteId que não existe, então a API responde 400"
+  it "quando o cliente vem sem endereço, então a API responde 400"
+  it "quando um cliente tem pedidos, então a exclusão é recusada com 409"
+  it "quando uma plataforma envia um pedido sem nome do cliente, então o pedido fica sem cliente"
+```
+
+Implementação: `backend/testes/clientes-pedidos.test.ts`, pelas APIs de clientes e de pedidos; o cenário da plataforma usa o mesmo adapter simulado do teste legado do iFood. Resultado local: 28 testes no resumo do Node, todos aprovados. Lacunas: o aviso "Já há um cliente com esse nome/endereço" do formulário do painel e o envio do telefone pelo chatbot não têm teste automatizado.
 
 ## Resultado da execução local
 

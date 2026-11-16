@@ -25,7 +25,10 @@ export async function requisitarApi<T>(base: string, caminho: string, init?: Req
     if (!resposta.ok) {
       // Token vencido ou inválido: volta para o login
       if (resposta.status === 401 && tokenAtual) aoExpirarSessao?.();
-      throw new ErroApi(corpo?.error ?? 'Não foi possível concluir a operação', resposta.status);
+      // Em erros 4xx o detalhe explica o motivo (ex.: endereço do restaurante sem cadastro)
+      const mensagem = corpo?.error ?? 'Não foi possível concluir a operação';
+      const detalhe = resposta.status < 500 && corpo?.detalhe ? `: ${corpo.detalhe}` : '';
+      throw new ErroApi(`${mensagem}${detalhe}`, resposta.status);
     }
     return corpo as T;
   } catch (erro) {

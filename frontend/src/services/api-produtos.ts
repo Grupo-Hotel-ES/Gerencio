@@ -21,9 +21,14 @@ export async function listarProdutos(): Promise<Produto[]> {
   return produtos.map(converter);
 }
 
-/** O produto vai para o restaurante do app (único); a api-produtos resolve o id. */
-export async function criarProduto(dados: Pick<Produto, 'nome' | 'preco' | 'categoria' | 'quantidade'>) {
-  return converter(await requisitarApi<ProdutoApi>(BASE_URL, '/produtos', {
+/**
+ * Liga os IDs que o produto tem nas plataformas a um produto do Gerêncio. O estoque e o preço
+ * informados passam a valer para todas as plataformas vinculadas.
+ */
+export async function vincularProduto(dados: Pick<Produto, 'nome' | 'preco' | 'categoria' | 'quantidade'> & {
+  vinculos: { plataforma: string; idExternoApp: string }[];
+}) {
+  return converter(await requisitarApi<ProdutoApi>(BASE_URL, '/produtos/vincular', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados),
   }));
 }
@@ -35,8 +40,13 @@ export async function atualizarProduto(id: number, dados: Pick<Produto, 'nome' |
   }));
 }
 
+/**
+ * A exclusão pelo painel arquiva o produto: ele sai do estoque e fica indisponível nas plataformas
+ * vinculadas, mas continua nos pedidos e relatórios. Repor unidades no portal de uma plataforma
+ * traz o produto de volta, por isso ele não é apagado de vez.
+ */
 export async function excluirProduto(id: number) {
-  await requisitarApi<null>(BASE_URL, `/produtos/${id}`, { method: 'DELETE' });
+  await requisitarApi<ProdutoApi>(BASE_URL, `/produtos/${id}/arquivar`, { method: 'POST' });
 }
 
 /** Código (SKU) que o produto tem em uma plataforma de delivery (tabela MapeamentoApp). */

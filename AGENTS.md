@@ -17,7 +17,7 @@ O Gerôncio centraliza pedidos de várias plataformas de delivery (iFood, Rappi,
 ```
 .
 ├── backend/          # Microsserviços Express + Prisma (pnpm workspace)
-│   ├── api-clientes/       # :3001  CRUD de clientes
+│   ├── api-clientes/       # :3001  CRUD e busca de clientes (nome, endereço, telefone)
 │   ├── api-pedidos/        # :3002  pedidos, status, entregador, relatório de vendas, frete e rotas de entrega
 │   ├── api-restaurantes/   # :3003  restaurante (único), login e usuários
 │   ├── api-produtos/       # :3004  produtos e mapeamentos produto ↔ id externo da plataforma
@@ -55,7 +55,7 @@ Dentro de `frontend/`: `pnpm web`, `pnpm android`, `pnpm ios`, `pnpm lint`.
 
 ### Regras obrigatórias de testes
 
-- Política acordada em 09/11/2026: concluir a base de regressão e as correções do PR #46, integrar as rotas do PR #47 e então ampliar a cobertura para todas as partes do projeto, em PRs pequenos por fluxo. Consulte o plano em [docs/cobertura-testes.md](docs/cobertura-testes.md#plano-de-ampliação-após-o-pr-47).
+- Política acordada em 09/11/2026: concluir a base de regressão e as correções do PR #46, integrar os ganhos e repasses dos motoboys do PR #47 e então ampliar a cobertura para todas as partes do projeto, em PRs pequenos por fluxo. Consulte o plano em [docs/cobertura-testes.md](docs/cobertura-testes.md#plano-de-ampliação-após-o-pr-47).
 - Durante essa sequência, preservar a suíte existente e adicionar regressões necessárias às correções. A ampliação planejada não dispensa corrigir falhas conhecidas ou executar os checks antes de integrar.
 - Leia [docs/regras-de-testes.md](docs/regras-de-testes.md) antes de criar ou alterar testes. Use `node:test`, `assert` e `tsx`, já presentes no projeto.
 - Apresente as frases `describe` / `it` em português (“quando ..., então ...”) e espere a confirmação do responsável antes de implementar comportamentos novos.
@@ -120,6 +120,8 @@ O app é **whitelabel**: atende um restaurante só. A tabela `Restaurante` conti
 - Para mudar o schema: edite `prisma/schema.prisma` e rode `pnpm db:migrate` com um nome descritivo em português (ex.: `adiciona_nome_cliente`). Nunca edite migrations já commitadas.
 - `Decimal` (preços) chega ao frontend como **string** no JSON; converta com `Number(...)`.
 - Status de pedido: `novo → em_preparo → pronto → saiu_para_entrega → entregue` (ou `cancelado`).
+- **Cliente do pedido**: o pedido não guarda o nome em texto; aponta para `Cliente` (`clienteId`, devolvido como `cliente` pela `api-pedidos`). `POST /api/pedidos` recebe `clienteId` ou `cliente: { nome, endereco, telefone? }`; sem `clienteId`, `obterOuCriarCliente` (`shared-db/src/clientes.ts`) reaproveita quem tem o mesmo nome e endereço (sem diferenciar maiúsculas) ou cadastra junto. `nomeCliente`/`telefoneCliente` ainda são aceitos (chatbot), com o endereço de entrega como endereço do cliente. A `api-integracao` faz o mesmo com os pedidos das plataformas; sem nome no payload, o pedido fica sem cliente. Cliente com pedidos não pode ser excluído.
+- **Produto arquivado**: `DELETE /produtos/:id` recusa (409) produto que aparece em pedidos, porque `ItemPedido` aponta para ele e os relatórios usam o nome e o preço. O painel exclui sempre por `POST /produtos/:id/arquivar`, que preenche `Produto.arquivadoEm` e mantém os `MapeamentoApp`: o sincronizador manda estoque 0, então o produto fica indisponível nas plataformas sem sumir delas. Arquivado não aparece em `GET /produtos` nem no cardápio do chatbot e é recusado em novos pedidos (`prepararItensPedido`), mas continua nos pedidos antigos e nos relatórios. Repor unidades no portal de uma plataforma desarquiva o produto (veja a sincronização abaixo). Um ID de plataforma de produto arquivado pode ser vinculado a outro produto: o vínculo passa para ele.
 - Variáveis de ambiente ficam em `backend/.env` (carregado por `--env-file-if-exists`). `DATABASE_URL` padrão: `postgresql://geroncio:geroncio_dev@localhost:5432/geroncio`.
 
 ### Chatbot (n8n)
@@ -164,23 +166,35 @@ A tela `rotas` do painel monta a rota com os pedidos `pronto` que têm entrega (
 
 O `api-integracao` recebe `POST /api/webhooks/:plataforma` (`ifood`, `99food`, `keeta`, `ubereats`, `rappi`), valida assinatura HMAC quando há segredo configurado (`RAPPI_WEBHOOK_SECRET`, `UBER_WEBHOOK_SECRET`...), normaliza o evento e cria o `Pedido` usando `MapeamentoApp` para traduzir ids externos em `Produto`. URLs externas vêm de env (`MOCK_API_URL`, `IFOOD_API_URL`), com padrão apontando para o mock em `localhost:3333`.
 
+**Vinculação e sincronização de estoque.** O produto é cadastrado em cada plataforma (portal do restaurante do mock), que gera um ID. Em Estoque → Vincular produto, o painel confere os IDs (`GET /api/catalogo/:plataforma/:idExterno` no `api-integracao`) e chama `POST /produtos/vincular` na `api-produtos`, que cria o `Produto` com os `MapeamentoApp` numa transação. Depois disso o Gerêncio guarda o saldo e o preço únicos, e a sincronização vale nos dois sentidos:
+
+- `api-integracao/src/sincronizador-estoque.ts` roda a cada `INTERVALO_SINCRONIZACAO_ESTOQUE_MS` (padrão 3 s), compara os valores atuais de cada `MapeamentoApp` com o último envio e manda só o que mudou: `PATCH /catalogo/:plataforma/:idExterno` no mock, com `{ quantidade, precoCentavos, origem: 'gerencio' }`. Produto arquivado vai com quantidade 0. Vínculo removido vira `DELETE .../vinculo` (com `?zerarEstoque=1` se o produto foi apagado; nada é desfeito se o ID passou para outro produto). O estado fica em memória: ao reiniciar, tudo é reenviado uma vez.
+- A baixa continua no aceite (`mudarStatusPedido`). Pedidos de plataforma com status `novo` e `estoqueBaixado = false` (já pagos no app) contam como **reserva**: a quantidade enviada é `quantidade − reservado`. Assim a venda numa plataforma reduz o saldo das outras assim que o pedido chega, e o cancelamento devolve.
+- **Caminho inverso**: estoque ou preço mudado no portal de um produto vinculado chega em `POST /api/webhooks/catalogo` (`{ plataforma, idExterno, quantidade?, precoCentavos? }`), tratado por `aplicarAlteracaoDaPlataforma`. O valor digitado é o disponível para venda, então o saldo do Gerêncio vira esse valor mais o reservado, com `versaoEstoque` incrementada. Produto arquivado que recebe unidades volta ao estoque. ID sem vínculo responde 404, e o mock passa a controlar o produto sozinho. Com `CATALOGO_WEBHOOK_SECRET` definido, exige `X-Plataforma-Assinatura` (`t=<timestamp>,sign=<hmac-sha256("<t>.<corpo>")>`, como a Rappi).
+- `GET /api/sincronizacao/estoque` devolve a situação de cada vínculo e as reservas; `POST` reenvia tudo (botão "Sincronizar agora"). Essas rotas exigem login quando chegam pelo nginx; os webhooks ficam livres.
+- No frontend, a URL vem de `EXPO_PUBLIC_API_INTEGRACAO_URL`.
+
 ## Mock (`mock/`)
 
 Simula o "mundo externo": o formulário web (`mock_frontend`, :3000) monta pedidos; a `mock_api` (:3333) grava no **banco próprio do mock** (Postgres em :5433, Prisma 7 com `@prisma/adapter-pg`) e dispara webhooks/polling para o `api-integracao`. Cada plataforma tem seu módulo em `mock_backend/<plataforma>/index.ts`, que monta o payload no formato real da plataforma (ver `docs/99food/swagger.yaml`).
 
+- O `mock_frontend` tem duas páginas: `/` é o **app do cliente** e `/restaurante` é o **portal do restaurante** (`src/Restaurante.js`), onde o produto é cadastrado em cada plataforma e recebe o ID dela (`GERAR_ID_PRODUTO` na `mock_api`).
+- O cardápio fica na tabela `produtos_plataforma` (`ProdutoPlataforma`), com as rotas `GET/POST /catalogo` e `GET/PATCH/DELETE /catalogo/:plataforma/:idExterno`. O app do cliente lê o cardápio e o estoque daí; o mock não consulta mais a `api-produtos`.
+- Um pedido com itens do cardápio usa o nome e o preço cadastrados e desconta o estoque da plataforma na mesma transação; acima do saldo responde 409 ("Acima do limite do estoque...") e, com estoque zero, "X está indisponível no iFood". O app do cliente mostra o produto como **Indisponível** e não deixa adicioná-lo. Itens fora do cardápio (roteiros `.http` antigos) seguem como vieram.
+- Produto com `sincronizadoEm` está vinculado ao Gerêncio. Estoque e preço mudados no portal são enviados antes ao Gerêncio (`GERENCIO_CATALOGO_URL`, padrão `http://localhost:3005/api/webhooks/catalogo`); se ele não responder, nada muda (502). O `PATCH` com `origem: 'gerencio'` é a sincronização vindo de lá. O produto só some das plataformas quando é excluído no portal.
 - O cliente Prisma do mock é gerado em `mock/src/generated/prisma` — não edite à mão; rode `pnpm db:generate` em `mock/`.
 - O mock e o backend são bancos **separados**; não misture schemas.
-- O cardápio do formulário vem da `api-produtos`, então o backend precisa estar de pé.
 
 ## Frontend (`frontend/`)
 
 - **Expo SDK 57** + expo-router + React Native 0.86 + React 19. As APIs do Expo mudaram: consulte https://docs.expo.dev/versions/v57.0.0/ antes de escrever código (ver `frontend/AGENTS.md`).
-- Rotas em `src/app/`. As páginas do painel ficam no grupo `(painel)/` (`index` = pedidos, `estoque`, `relatorios`), com layout de sidebar + top bar em `(painel)/_layout.tsx`.
+- Rotas em `src/app/`. As páginas do painel ficam no grupo `(painel)/` (`index` = pedidos, `estoque`, `relatorios`, `clientes`...), com layout de sidebar + top bar em `(painel)/_layout.tsx`.
 - Componentes do painel em `src/components/dashboard/` (`ui.tsx` tem os primitivos e o mapa de ícones `ICONES`, com nomes SF Symbols / Material por plataforma).
 - **Cores e espaçamentos só via tokens**: `useCores()` (`src/hooks/use-cores.ts`) e `Espacamento`/`Raio` de `src/constants/tokens.ts`. Não use cores hex soltas nos componentes. Os tokens espelham `src/design-system/variables/*.json` (exportados do Figma); se mudar um, mude o outro.
 - Os protótipos de cada tela (web e mobile) estão em `src/design-system/prototypes/` — use-os como referência visual ao implementar uma página.
 - Chamadas HTTP em `src/services/api-*.ts`. A URL base vem de `EXPO_PUBLIC_API_*_URL` com fallback para `localhost`. Cada serviço converte o formato da API para o tipo da UI (em `src/data/`).
 - O layout é responsivo: com largura ≥ 960 aparece a sidebar; abaixo disso, a navegação compacta.
+- **Relatório em PDF**: o botão "Exportar PDF" de `relatorios` monta um HTML (`data/relatorio-html.ts`) e chama `exportarPdf` (`services/exportar-pdf.ts`). No app, abre a impressão do sistema com `expo-print`, onde se salva ou compartilha o PDF. Na web (`exportar-pdf.web.ts`), imprime um iframe só com o relatório, porque o `expo-print` na web imprime a página inteira; o usuário escolhe "Salvar como PDF". O `expo-sharing` ficou de fora: a versão do SDK 57 depende de um pacote barrado pelo `minimumReleaseAge` do pnpm.
 - Estilo de código: aspas simples, com ponto e vírgula, `StyleSheet.create` no fim do arquivo.
 
 ## Git

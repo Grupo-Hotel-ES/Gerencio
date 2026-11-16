@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 
-// Endereço da API do mock (mock_backend/mock_api), que grava os pedidos no banco do mock
+// Endereço da API do mock (mock_backend/mock_api): guarda os pedidos e o cardápio de cada plataforma
 const API_URL = process.env.REACT_APP_MOCK_API_URL || 'http://localhost:3333';
-// Endereço da api-produtos do Gerencio (backend/api-produtos), de onde vem o cardápio
-const PRODUTOS_API_URL = process.env.REACT_APP_PRODUTOS_API_URL || 'http://localhost:3004';
+// O saldo muda com pedidos de outros clientes e com a sincronização do Gerêncio
+const INTERVALO_ATUALIZACAO_MS = 5000;
 
-// A api-produtos não tem imagem; mostra um ícone no lugar quando o produto não tiver
+// O cardápio da plataforma não tem imagem; mostra um ícone no lugar
 function ImagemProduto({ produto, tamanho }) {
   const estilo = { width: tamanho, height: tamanho, borderRadius: '8px', objectFit: 'cover', marginRight: '15px', flexShrink: 0 };
   if (produto.img) return <img src={produto.img} alt={produto.nome} style={estilo} />;
@@ -14,52 +14,58 @@ function ImagemProduto({ produto, tamanho }) {
 }
 
 export default function App() {
-  // 1. Os dados dos produtos (carregados da api-produtos quando a tela abre)
-  const [produtos, setProdutos] = useState([]);
-  const [mapeamentos, setMapeamentos] = useState([]);
-  const [erroProdutos, setErroProdutos] = useState(null);
-  const [carregandoProdutos, setCarregandoProdutos] = useState(true);
-
-  useEffect(() => {
-    const buscar = caminho => fetch(`${PRODUTOS_API_URL}${caminho}`).then(resposta => {
-      if (!resposta.ok) throw new Error(`Erro ${resposta.status}`);
-      return resposta.json();
-    });
-
-    Promise.all([buscar('/produtos'), buscar('/mapeamentos')])
-      .then(([lista, listaMapeamentos]) => {
-        // O preço vem como texto (Decimal no banco), então é convertido para número
-        setProdutos(lista.map(produto => ({ ...produto, preco: Number(produto.preco) })));
-        setMapeamentos(listaMapeamentos);
-      })
-      .catch(erro => setErroProdutos(erro.message))
-      .finally(() => setCarregandoProdutos(false));
-  }, []);
-
-  // 2. A "Memória" do aplicativo (Nosso interruptor de luz começa no 'pedido')
+  // 1. A "Memória" do aplicativo (Nosso interruptor de luz começa no 'pedido')
   const [abaAtiva, setAbaAtiva] = useState('pedido');
   const [carrinho, setCarrinho] = useState({});
-  
+
   // Dados do formulário
   const [appSelecionado, setAppSelecionado] = useState('ifood');
   const [nome, setNome] = useState('');
   const [endereco, setEndereco] = useState('');
   const [enviando, setEnviando] = useState(false);
 
-  // Como uma plataforma real, o mock só conhece o código que o produto tem nela (MapeamentoApp),
-  // nunca o id interno do Gerencio. Produto sem mapeamento não existe no cardápio da plataforma.
-  const plataformaMapeamento = appSelecionado.replace(/\s/g, ''); // "uber eats" -> "ubereats"
-  const codigoExternoPorProduto = new Map(
-    mapeamentos
-      .filter(m => String(m.plataforma).toLowerCase() === plataformaMapeamento.toLowerCase())
-      .map(m => [m.produtoId, m.idExternoApp])
-  );
-  const produtosDaPlataforma = produtos.filter(produto => codigoExternoPorProduto.has(produto.id));
+  // 2. O cardápio da plataforma escolhida: o restaurante cadastra no portal (/restaurante)
+  // e cada produto tem o ID e o estoque daquela plataforma.
+  const [produtosDaPlataforma, setProdutosDaPlataforma] = useState([]);
+  const [erroProdutos, setErroProdutos] = useState(null);
+  const [carregandoProdutos, setCarregandoProdutos] = useState(true);
+  // Evita que a resposta atrasada de uma plataforma apareça depois de trocar para outra
+  const plataformaAtual = useRef(appSelecionado);
+  plataformaAtual.current = appSelecionado;
+
+  const carregarCardapio = useCallback(() => {
+    return fetch(`${API_URL}/catalogo?plataforma=${encodeURIComponent(appSelecionado)}`)
+      .then(resposta => {
+        if (!resposta.ok) throw new Error(`Erro ${resposta.status}`);
+        return resposta.json();
+      })
+      .then(lista => {
+        if (plataformaAtual.current !== appSelecionado) return;
+        // O id do produto no carrinho é o ID que a plataforma gerou (idExterno)
+        setProdutosDaPlataforma(lista.map(produto => ({ ...produto, id: produto.idExterno, preco: produto.precoCentavos / 100 })));
+        setErroProdutos(null);
+      })
+      .catch(erro => setErroProdutos(erro.message))
+      .finally(() => setCarregandoProdutos(false));
+  }, [appSelecionado]);
+
+  useEffect(() => {
+    carregarCardapio();
+    const intervalo = setInterval(carregarCardapio, INTERVALO_ATUALIZACAO_MS);
+    return () => clearInterval(intervalo);
+  }, [carregarCardapio]);
+
+  // Pedir mais do que o saldo é permitido no carrinho, mas a plataforma recusa o pedido.
+  // Produto com estoque zero fica indisponível: continua no cardápio, mas não entra no carrinho.
+  const indisponivel = (produto) => produto.quantidade === 0;
+  const acimaDoEstoque = (produto) => (carrinho[produto.id] || 0) > produto.quantidade;
 
   // Cada plataforma tem seu cardápio, então trocar de plataforma esvazia o carrinho
   const trocarPlataforma = (plataforma) => {
     setAppSelecionado(plataforma);
     setCarrinho({});
+    setProdutosDaPlataforma([]);
+    setCarregandoProdutos(true);
   };
 
   // 3. A Lógica Matemática
@@ -110,18 +116,14 @@ export default function App() {
     
     if (valorTotal === 0) return alert("Seu carrinho está vazio!");
 
-    // Cada pedido pertence a um único restaurante
-    const produtosNoCarrinho = produtosDaPlataforma.filter(produto => carrinho[produto.id]);
-    const restaurantes = new Set(produtosNoCarrinho.map(produto => produto.restauranteId));
-    if (restaurantes.size > 1) return alert("O carrinho tem produtos de mais de um restaurante. Faça um pedido por restaurante.");
-    
-    // Monta os itens do carrinho no formato da API (preços em centavos)
-    const itens = produtosNoCarrinho
+    // Monta os itens do carrinho no formato da API: o código é o ID do produto na plataforma
+    const itens = produtosDaPlataforma
+      .filter(produto => carrinho[produto.id])
       .map(produto => ({
-        codigoExterno: codigoExternoPorProduto.get(produto.id),
+        codigoExterno: produto.idExterno,
         nome: produto.nome,
         quantidade: carrinho[produto.id],
-        precoUnitarioCentavos: Math.round(produto.preco * 100)
+        precoUnitarioCentavos: produto.precoCentavos
       }));
 
     setEnviando(true);
@@ -129,7 +131,7 @@ export default function App() {
       const resposta = await fetch(`${API_URL}/pedidos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plataforma: appSelecionado, restauranteId: String(produtosNoCarrinho[0].restauranteId), cliente: { nome }, endereco, itens })
+        body: JSON.stringify({ plataforma: appSelecionado, cliente: { nome }, endereco, itens })
       });
       const pedido = await resposta.json();
       if (!resposta.ok) throw new Error(pedido.erro || `Erro ${resposta.status}`);
@@ -138,9 +140,11 @@ export default function App() {
       setCarrinho({});
       setAbaAtiva('pedido');
     } catch (erro) {
-      alert(`Não foi possível enviar o pedido: ${erro.message}`);
+      // Ex.: "Acima do limite do estoque: X-Burguer tem 3 unidades disponíveis no iFood" ou "X-Burguer está indisponível no iFood"
+      alert(`Erro ao realizar pedido\n\n${erro.message}`);
     } finally {
       setEnviando(false);
+      carregarCardapio();
     }
   };
 
@@ -152,6 +156,8 @@ export default function App() {
       
       <div style={{ maxWidth: '400px', margin: '0 auto', backgroundColor: tema.fundoCaixa, padding: '20px', borderRadius: '10px', border: tema.borda, position: 'relative' }}>
         
+        <a href="/restaurante" style={{ display: 'block', textAlign: 'right', fontSize: '13px', color: '#ccc', marginBottom: '12px' }}>Portal do restaurante ➔</a>
+
         {/* INTERRUPTORES DOS CÔMODOS (As abas no topo) */}
         <div style={{ display: 'flex', gap: '5px', marginBottom: '20px' }}>
           <button onClick={() => setAbaAtiva('pedido')} style={{ flex: 1, padding: '12px', borderRadius: '5px', border: 'none', cursor: 'pointer', fontWeight: 'bold', backgroundColor: abaAtiva === 'pedido' ? tema.corPrimaria : '#333', color: '#fff' }}>Realizar Pedido</button>
@@ -188,25 +194,28 @@ export default function App() {
         {/* CÔMODO 2: CARDÁPIO */}
         <div style={{ display: abaAtiva === 'cardapio' ? 'block' : 'none', paddingBottom: '60px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-            {erroProdutos && <p style={{ textAlign: 'center', color: '#e74c3c' }}>Não foi possível carregar o cardápio ({erroProdutos}). A api-produtos está rodando?</p>}
+            {erroProdutos && <p style={{ textAlign: 'center', color: '#e74c3c' }}>Não foi possível carregar o cardápio ({erroProdutos}). A API do mock está rodando?</p>}
             {carregandoProdutos && <p style={{ textAlign: 'center', color: '#666' }}>Carregando cardápio...</p>}
-            {!carregandoProdutos && !erroProdutos && produtos.length === 0 && <p style={{ textAlign: 'center', color: '#666' }}>Nenhum produto cadastrado.</p>}
-            {produtos.length > 0 && produtosDaPlataforma.length === 0 && <p style={{ textAlign: 'center', color: '#666' }}>Nenhum produto mapeado para esta plataforma. Cadastre o mapeamento na api-produtos.</p>}
+            {!carregandoProdutos && !erroProdutos && produtosDaPlataforma.length === 0 && <p style={{ textAlign: 'center', color: '#666' }}>Nenhum produto no cardápio desta plataforma. Cadastre no <a href="/restaurante" style={{ color: '#ccc' }}>portal do restaurante</a>.</p>}
             {produtosDaPlataforma.map((item) => (
-              <div key={item.id} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#2a2a2a', borderRadius: '8px', padding: '10px' }}>
+              <div key={item.id} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#2a2a2a', borderRadius: '8px', padding: '10px', opacity: indisponivel(item) ? 0.6 : 1 }}>
                 
                 <ImagemProduto produto={item} tamanho={70} />
                 
                 <div style={{ flex: 1 }}>
                   <h4 style={{ margin: '0 0 5px 0', fontSize: '15px' }}>{item.nome}</h4>
-                  {item.restaurante && <div style={{ fontSize: '12px', color: '#999', marginBottom: '5px' }}>{item.restaurante.nome}</div>}
+                  <div style={{ fontSize: '12px', color: '#999', marginBottom: '5px' }}>{item.categoria}</div>
                   <span style={{ color: '#27ae60', fontWeight: 'bold' }}>R$ {item.preco.toFixed(2).replace('.', ',')}</span>
+                  <div style={{ fontSize: '12px', color: indisponivel(item) ? '#e74c3c' : '#999', marginTop: '5px', fontWeight: indisponivel(item) ? 'bold' : 'normal' }}>
+                    {indisponivel(item) ? 'Indisponível' : `Estoque: ${item.quantidade} un.`}
+                  </div>
+                  {acimaDoEstoque(item) && !indisponivel(item) && <div style={{ fontSize: '12px', color: '#e74c3c', fontWeight: 'bold', marginTop: '3px' }}>Acima do limite do estoque</div>}
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#121212', borderRadius: '5px', border: tema.borda }}>
                   <button onClick={() => diminuirDoCarrinho(item.id)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '18px', width: '30px', height: '30px', cursor: 'pointer' }}>-</button>
                   <div style={{ width: '25px', textAlign: 'center', fontWeight: 'bold' }}>{carrinho[item.id] || 0}</div>
-                  <button onClick={() => adicionarAoCarrinho(item.id)} style={{ background: 'none', border: 'none', color: tema.corPrimaria, fontSize: '18px', width: '30px', height: '30px', cursor: 'pointer', fontWeight: 'bold' }}>+</button>
+                  <button onClick={() => adicionarAoCarrinho(item.id)} disabled={indisponivel(item)} aria-label={`Adicionar ${item.nome}`} style={{ background: 'none', border: 'none', color: indisponivel(item) ? '#555' : tema.corPrimaria, fontSize: '18px', width: '30px', height: '30px', cursor: indisponivel(item) ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}>+</button>
                 </div>
               </div>
             ))}
@@ -233,12 +242,15 @@ export default function App() {
               return (
                 <div key={item.id} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#2a2a2a', padding: '10px', borderRadius: '5px' }}>
                   <ImagemProduto produto={item} tamanho={40} />
-                  <div style={{ flex: 1, fontSize: '14px' }}>{item.nome}</div>
+                  <div style={{ flex: 1, fontSize: '14px' }}>
+                    {item.nome}
+                    {acimaDoEstoque(item) && <div style={{ fontSize: '12px', color: '#e74c3c', fontWeight: 'bold' }}>{indisponivel(item) ? 'Indisponível' : `Acima do limite do estoque (${item.quantidade} disponíveis)`}</div>}
+                  </div>
                   
                   <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#121212', borderRadius: '5px', marginRight: '10px' }}>
                     <button onClick={() => diminuirDoCarrinho(item.id)} style={{ background: 'none', border: 'none', color: '#fff', width: '25px', height: '25px', cursor: 'pointer' }}>-</button>
                     <div style={{ width: '20px', textAlign: 'center', fontSize: '14px' }}>{qtd}</div>
-                    <button onClick={() => adicionarAoCarrinho(item.id)} style={{ background: 'none', border: 'none', color: tema.corPrimaria, width: '25px', height: '25px', cursor: 'pointer' }}>+</button>
+                    <button onClick={() => adicionarAoCarrinho(item.id)} disabled={indisponivel(item)} style={{ background: 'none', border: 'none', color: indisponivel(item) ? '#555' : tema.corPrimaria, width: '25px', height: '25px', cursor: indisponivel(item) ? 'not-allowed' : 'pointer' }}>+</button>
                   </div>
                   
                   <button onClick={() => removerTudoDoProduto(item.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }}>🗑️</button>

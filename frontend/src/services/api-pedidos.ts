@@ -13,7 +13,7 @@ const BASE_URL = process.env.EXPO_PUBLIC_API_PEDIDOS_URL ?? 'http://localhost:30
 /** Pedido no formato devolvido pela api-pedidos. */
 type PedidoApi = {
   id: number;
-  nomeCliente: string | null;
+  cliente: { id: number; nomeCliente: string } | null;
   preco: string;
   app: string;
   enderecoDestino: string;
@@ -61,7 +61,7 @@ function converter(pedido: PedidoApi): Pedido {
     numero: pedido.id,
     restaurante: pedido.restaurante?.nome ?? 'Restaurante não identificado',
     canal: nomeDoCanal(pedido.app),
-    cliente: pedido.nomeCliente ?? 'Cliente não identificado',
+    cliente: pedido.cliente?.nomeCliente ?? 'Cliente não identificado',
     horario: formatarHora(new Date(pedido.criadoEm)),
     itens: pedido.itens.map((item) => `${item.quantidade}× ${item.produto.nome}`),
     entrega: entregador
@@ -88,7 +88,9 @@ export async function listarPedidosAtivos(): Promise<Pedido[]> {
 
 /** O restaurante (único) vem dos produtos do pedido. */
 export type NovoPedido = {
-  nomeCliente: string;
+  /** Cliente já cadastrado (escolhido no aviso) ou os dados para cadastrar junto. */
+  clienteId?: number;
+  cliente?: { nome: string; endereco: string; telefone?: string };
   app: 'balcao' | 'whatsapp';
   metodoPagamento: string;
   enderecoDestino: string;

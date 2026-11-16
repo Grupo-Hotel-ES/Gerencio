@@ -52,7 +52,10 @@ async function montarParadas({ restauranteId, pedidoIds }: EntradaRota) {
   const restaurante = await db.restaurante.findUnique({ where: { id: restauranteId } })
   if (!restaurante) throw new ErroOperacao(404, 'Restaurante não encontrado')
 
-  const pedidos = await db.pedido.findMany({ where: { id: { in: pedidoIds } } })
+  const pedidos = await db.pedido.findMany({
+    where: { id: { in: pedidoIds } },
+    include: { cliente: { select: { nomeCliente: true } } },
+  })
   const porId = new Map(pedidos.map((p) => [p.id, p]))
 
   const origem = await obterCoordenadasRestaurante(restaurante).catch((error: Error) => {
@@ -81,7 +84,7 @@ async function montarParadas({ restauranteId, pedidoIds }: EntradaRota) {
       coordenada = { latitude: geo.latitude, longitude: geo.longitude }
       await db.pedido.update({ where: { id }, data: coordenada })
     }
-    paradas.push({ pedidoId: id, cliente: pedido.nomeCliente, endereco: pedido.enderecoDestino, ...coordenada })
+    paradas.push({ pedidoId: id, cliente: pedido.cliente?.nomeCliente ?? null, endereco: pedido.enderecoDestino, ...coordenada })
   }
 
   return {

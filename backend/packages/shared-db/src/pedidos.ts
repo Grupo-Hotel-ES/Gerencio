@@ -24,6 +24,8 @@ export async function prepararItensPedido(tx: Prisma.TransactionClient, entrada:
   }
   const produtos = await tx.produto.findMany({ where: { id: { in: [...quantidades.keys()] } } })
   if (produtos.length !== quantidades.size) throw new ErroOperacao(400, 'Um dos produtos não existe')
+  const arquivado = produtos.find((produto) => produto.arquivadoEm)
+  if (arquivado) throw new ErroOperacao(400, `${arquivado.nome} saiu do estoque e não pode mais ser vendido`)
   const restauranteId = produtos[0]!.restauranteId
   if (produtos.some((produto) => produto.restauranteId !== restauranteId) ||
       (restauranteInformado !== undefined && restauranteInformado !== restauranteId)) {

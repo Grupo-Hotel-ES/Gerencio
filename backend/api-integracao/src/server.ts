@@ -1,5 +1,6 @@
 // api-pedidos/src/server.ts
 import express, { type ErrorRequestHandler } from 'express'
+import { exigirLoginPublico } from '@geroncio/shared-db'
 import routes, { type RequestComCorpoBruto } from './routes'
 
 const app = express()
@@ -31,6 +32,9 @@ app.use((req, res, next) => {
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', service: 'api-pedidos' })
 })
+
+// Login: obrigatório para quem chega pela internet (nginx), exceto os webhooks das plataformas
+app.use(exigirLoginPublico({ livres: [/^\/api\/webhooks\//] }))
 
 // Rotas
 app.use('/api', routes)

@@ -7,7 +7,7 @@ Para começar pelo vocabulário e pelos exemplos, leia [Conceitos de testes no G
 ## Política de evolução acordada em 09/11/2026
 
 1. Concluir o PR #46 com a suíte existente, a correção do bug financeiro reproduzido, a verificação de tipos de todos os testes e relatórios que identifiquem a execução atual. Validar localmente com PostgreSQL isolado no Docker e exigir o CI aprovado antes da integração à develop.
-2. Integrar o PR #47 de rotas, revisando o comportamento final e executando os checks e a suíte existente. Preservar as regressões já protegidas.
+2. Integrar o PR #47 de ganhos e repasses dos motoboys, revisando o comportamento final e executando os checks e a suíte existente. Preservar as regressões já protegidas.
 3. Depois do PR #47, inventariar todas as partes do projeto e ampliar sua cobertura em PRs pequenos por fluxo: backend, frontend, integrações externas, chatbot e mock. O [plano de cobertura](cobertura-testes.md#plano-de-ampliação-após-o-pr-47) orienta essa etapa.
 
 Para cada fluxo, confirmar primeiro os cenários em português com o responsável. Testes unitários, de integração, de interface e E2E devem ser escolhidos conforme o risco e o que precisa ser comprovado. A meta é cobrir os comportamentos relevantes de todas as partes, com lacunas explícitas; não prometer cobertura integral com base apenas na quantidade de testes ou em uma porcentagem de linhas.

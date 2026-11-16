@@ -150,7 +150,7 @@ O banco e a API continuam rodando depois de fechar o formulário; para derrubá-
 
 ### Política de testes
 
-Primeiro estabilizamos a base de testes do PR #46 e integramos o PR #47 de rotas. Depois ampliaremos a cobertura de todas as partes do projeto em PRs pequenos por fluxo, com cenários aprovados e resultados documentados. Durante essa sequência, os testes existentes continuam obrigatórios e as falhas conhecidas devem ser corrigidas. Leia as [regras de testes](docs/regras-de-testes.md) e o [plano de cobertura](docs/cobertura-testes.md#plano-de-ampliação-após-o-pr-47).
+Primeiro estabilizamos a base de testes do PR #46 e integramos o PR #47 de ganhos e repasses dos motoboys. Depois ampliaremos a cobertura de todas as partes do projeto em PRs pequenos por fluxo, com cenários aprovados e resultados documentados. Durante essa sequência, os testes existentes continuam obrigatórios e as falhas conhecidas devem ser corrigidas. Leia as [regras de testes](docs/regras-de-testes.md) e o [plano de cobertura](docs/cobertura-testes.md#plano-de-ampliação-após-o-pr-47).
 
 ## Deploy (VPS)
 
@@ -158,6 +158,7 @@ Produção em uma VPS Ubuntu com Docker (Postgres + APIs), nginx (frontend está
 
 ```
 https://geroncio.exemplo.com/                  → frontend (/var/www/geroncio)
+https://geroncio.exemplo.com/svc/clientes/     → 127.0.0.1:3001
 https://geroncio.exemplo.com/svc/pedidos/      → 127.0.0.1:3002
 https://geroncio.exemplo.com/svc/restaurantes/ → 127.0.0.1:3003
 https://geroncio.exemplo.com/svc/produtos/     → 127.0.0.1:3004
@@ -240,10 +241,12 @@ curl -s localhost:3002/health
 `frontend/.env` (os valores entram no código no build):
 
 ```env
+EXPO_PUBLIC_API_CLIENTES_URL=https://geroncio.exemplo.com/svc/clientes/api
 EXPO_PUBLIC_API_PEDIDOS_URL=https://geroncio.exemplo.com/svc/pedidos/api
 EXPO_PUBLIC_API_PRODUTOS_URL=https://geroncio.exemplo.com/svc/produtos
 EXPO_PUBLIC_API_RESTAURANTES_URL=https://geroncio.exemplo.com/svc/restaurantes/api
 EXPO_PUBLIC_API_PAGAMENTOS_URL=https://geroncio.exemplo.com/svc/pagamentos/api
+EXPO_PUBLIC_API_INTEGRACAO_URL=https://geroncio.exemplo.com/svc/integracao/api
 EXPO_PUBLIC_URL_RETORNO_PAGAMENTO=https://geroncio.exemplo.com/assinatura/pagamento
 ```
 
@@ -294,10 +297,12 @@ server {
     }
 
     # A barra no fim do proxy_pass tira o prefixo /svc/<nome>
+    location /svc/clientes/     { proxy_pass http://127.0.0.1:3001/; include /etc/nginx/proxy_geroncio.conf; }
     location /svc/pedidos/      { proxy_pass http://127.0.0.1:3002/; include /etc/nginx/proxy_geroncio.conf; }
     location /svc/restaurantes/ { proxy_pass http://127.0.0.1:3003/; include /etc/nginx/proxy_geroncio.conf; }
     location /svc/produtos/     { proxy_pass http://127.0.0.1:3004/; include /etc/nginx/proxy_geroncio.conf; }
     location /svc/pagamentos/   { proxy_pass http://127.0.0.1:3006/; include /etc/nginx/proxy_geroncio.conf; }
+    location /svc/integracao/   { proxy_pass http://127.0.0.1:3005/; include /etc/nginx/proxy_geroncio.conf; }
 }
 ```
 
