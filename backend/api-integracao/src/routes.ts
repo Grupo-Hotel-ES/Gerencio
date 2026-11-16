@@ -1,6 +1,9 @@
 import { Router, type Request } from 'express'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { db, obterOuCriarCliente, prepararItensPedido, type Prisma } from '@geroncio/shared-db'
+import {
+  NOME_PLATAFORMA, aplicarAlteracaoDaPlataforma, normalizarPlataforma, situacaoSincronizacao, sincronizarTudoAgora,
+} from './sincronizador-estoque'
 
 const routes = Router()
 
@@ -398,6 +401,48 @@ export async function processarNotificacao(
 // Rotas
 // ---------------------------------------------------------------------------
 
+// ESTOQUE OU PREÇO MUDADO NO PORTAL DA PLATAFORMA (produto vinculado)
+// POST /api/webhooks/catalogo  { plataforma, idExterno, quantidade?, precoCentavos? }
+// Fica antes de /webhooks/:plataforma para não ser lido como uma plataforma chamada "catalogo".
+// Com CATALOGO_WEBHOOK_SECRET definido, exige o cabeçalho X-Plataforma-Assinatura no formato
+// t=<timestamp>,sign=<hmac-sha256("<t>.<corpo>")>, o mesmo esquema da Rappi.
+routes.post('/webhooks/catalogo', async (req, res) => {
+  const segredo = process.env.CATALOGO_WEBHOOK_SECRET
+  if (segredo) {
+    const partes = Object.fromEntries((req.get('X-Plataforma-Assinatura') ?? '').split(',').map((parte) => parte.trim().split('=', 2)))
+    const corpo = (req as RequestComCorpoBruto).corpoBruto
+    const esperado = corpo && partes.t ? createHmac('sha256', segredo).update(`${partes.t}.`).update(corpo).digest() : null
+    const recebido = Buffer.from(String(partes.sign ?? ''), 'hex')
+    if (!esperado || recebido.length !== esperado.length || !timingSafeEqual(recebido, esperado)) {
+      res.status(401).json({ error: 'Assinatura do webhook inválida' })
+      return
+    }
+  }
+
+  const { quantidade, precoCentavos } = req.body ?? {}
+  const plataforma = normalizarPlataforma(req.body?.plataforma)
+  const idExterno = typeof req.body?.idExterno === 'string' ? req.body.idExterno.trim() : ''
+  if (!plataforma || !idExterno || idExterno.length > 100 ||
+      (quantidade === undefined && precoCentavos === undefined) ||
+      (quantidade !== undefined && (!Number.isInteger(quantidade) || quantidade < 0 || quantidade > 1_000_000)) ||
+      (precoCentavos !== undefined && (!Number.isInteger(precoCentavos) || precoCentavos < 0 || precoCentavos > 9_999_999_999))) {
+    res.status(400).json({ error: 'Informe plataforma, idExterno e quantidade (0 a 1.000.000) e/ou precoCentavos inteiros' })
+    return
+  }
+
+  try {
+    const resultado = await aplicarAlteracaoDaPlataforma(plataforma, idExterno, { quantidade, precoCentavos })
+    if (!resultado) {
+      res.status(404).json({ error: `O ID ${idExterno} do ${NOME_PLATAFORMA[plataforma]} não está vinculado a nenhum produto` })
+      return
+    }
+    const { produto, restaurado } = resultado
+    res.json({ produtoId: produto.id, nome: produto.nome, quantidade: produto.quantidade, preco: Number(produto.preco), restaurado })
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erro ao aplicar a alteração da plataforma', detalhe: error.message })
+  }
+})
+
 // WEBHOOK / NOTIFICAÇÃO DE NOVOS PEDIDOS
 // POST /api/webhooks/:plataforma
 routes.post('/webhooks/:plataforma', async (req, res) => {
@@ -437,6 +482,52 @@ routes.post('/webhooks/:plataforma', async (req, res) => {
   } catch (error: any) {
     console.error(`[${plataforma}] Erro ao registrar notificação:`, error)
     res.status(500).json({ error: 'Não foi possível registrar a notificação', detalhe: error.message })
+  }
+})
+
+// CONSULTAR PRODUTO NA PLATAFORMA (confere o ID digitado em "Vincular produto")
+// GET /api/catalogo/:plataforma/:idExterno
+routes.get('/catalogo/:plataforma/:idExterno', async (req, res) => {
+  const plataforma = normalizarPlataforma(req.params.plataforma)
+  const idExterno = req.params.idExterno.trim()
+  if (!plataforma || !idExterno) {
+    res.status(400).json({ error: 'Informe a plataforma e o ID do produto' })
+    return
+  }
+  const base = (process.env.MOCK_API_URL ?? 'http://localhost:3333').replace(/\/$/, '')
+  try {
+    const resposta = await fetch(`${base}/catalogo/${plataforma}/${encodeURIComponent(idExterno)}`, {
+      signal: AbortSignal.timeout(5_000),
+    })
+    const corpo = await resposta.json().catch(() => null) as any
+    if (resposta.status === 404) {
+      res.status(404).json({ error: `ID ${idExterno} não encontrado no ${NOME_PLATAFORMA[plataforma]}` })
+      return
+    }
+    if (!resposta.ok) throw new Error(corpo?.erro ?? `status ${resposta.status}`)
+    res.json({
+      plataforma, idExterno: corpo.idExterno, nome: corpo.nome, categoria: corpo.categoria,
+      preco: corpo.precoCentavos / 100, quantidade: corpo.quantidade,
+    })
+  } catch (error: any) {
+    res.status(502).json({ error: `Não foi possível consultar o ${NOME_PLATAFORMA[plataforma]} agora`, detalhe: error.message })
+  }
+})
+
+// SITUAÇÃO DA SINCRONIZAÇÃO DE ESTOQUE COM AS PLATAFORMAS
+// GET /api/sincronizacao/estoque
+routes.get('/sincronizacao/estoque', (req, res) => {
+  res.json(situacaoSincronizacao())
+})
+
+// SINCRONIZAR AGORA: reenvia estoque e preço de todos os produtos vinculados
+// POST /api/sincronizacao/estoque
+routes.post('/sincronizacao/estoque', async (req, res) => {
+  try {
+    await sincronizarTudoAgora()
+    res.json(situacaoSincronizacao())
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erro ao sincronizar o estoque', detalhe: error.message })
   }
 })
 

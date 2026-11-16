@@ -122,6 +122,8 @@ model Produto {
   categoria     String           @default("Sem categoria")
   quantidade    Int              @default(0)
   versaoEstoque Int              @default(0) @map("versao_estoque")
+  /// Preenchido quando o produto sai do estoque mas continua nos pedidos e relatórios.
+  arquivadoEm   DateTime?        @map("arquivado_em")
   restauranteId Int              @map("restaurante_id")
   restaurante   Restaurante      @relation(fields: [restauranteId], references: [id], onDelete: Cascade)
   mapeamentos   MapeamentoApp[]

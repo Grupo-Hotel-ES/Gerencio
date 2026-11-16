@@ -129,3 +129,27 @@ model Evento {
   @@map("eventos")
 }
 
+
+/// Produto do cardápio de uma plataforma, cadastrado pelo restaurante no portal de parceiros
+/// (página /restaurante do mock_frontend). O cardápio do cliente é lido daqui.
+model ProdutoPlataforma {
+  id            String     @id @default(uuid()) @db.Uuid
+  plataforma    Plataforma
+  /// ID que a plataforma gera para o produto. É o código digitado na vinculação do Gerêncio.
+  idExterno     String     @map("id_externo")
+  nome          String
+  categoria     String     @default("Sem categoria")
+  precoCentavos Int        @map("preco_centavos")
+  quantidade    Int        @default(0)
+
+  /// Última atualização de estoque e preço recebida do Gerêncio. Nulo enquanto o produto
+  /// não estiver vinculado; com valor, o portal deixa o saldo e o preço a cargo do Gerêncio.
+  sincronizadoEm DateTime? @map("sincronizado_em") @db.Timestamptz(3)
+
+  criadoEm     DateTime @default(now()) @map("criado_em") @db.Timestamptz(3)
+  atualizadoEm DateTime @updatedAt @map("atualizado_em") @db.Timestamptz(3)
+
+  @@unique([plataforma, idExterno])
+  @@index([plataforma, nome])
+  @@map("produtos_plataforma")
+}

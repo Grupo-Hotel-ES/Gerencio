@@ -330,8 +330,9 @@ routes.get('/restaurantes/:id/produtos', async (req, res) => {
       return
     }
 
+    // Cardápio do chatbot: produtos arquivados saíram do estoque e não são mais vendidos.
     const produtos = await db.produto.findMany({
-      where: { restauranteId },
+      where: { restauranteId, arquivadoEm: null },
     })
     res.json(produtos)
   } catch (error: any) {

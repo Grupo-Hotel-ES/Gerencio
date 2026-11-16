@@ -29,8 +29,8 @@ As URLs padrão estão em `frontend/.env.example`. Para alterá-las, copie para 
 
 ## Validar pela tela
 
-1. Tenha pelo menos um restaurante cadastrado na API de restaurantes (`POST http://localhost:3003/api/restaurantes`). O dashboard ainda não tem formulário de cadastro de restaurante.
-2. Abra **Estoque**, escolha o restaurante e use **Cadastrar produto**. Informe nome, categoria, preço e quantidade inicial. A edição do produto abre em seguida: em **Códigos nas plataformas**, informe o código (SKU) que o produto tem em cada aplicativo, por exemplo `SKU-IFOOD-123`. Sem código, o produto não aparece no cardápio daquela plataforma no simulador e os pedidos dela não são reconhecidos. O botão **Editar** de cada produto permite mudar nome, categoria, preço e códigos, ou excluir o produto.
+1. O app atende um restaurante só, criado pela migration; os dados dele ficam em **Configurações → Estabelecimento**.
+2. Os produtos são cadastrados nas plataformas de delivery, não no Gerêncio. Suba o mock (veja [Vincular produtos das plataformas](#vincular-produtos-das-plataformas)), abra o **portal do restaurante** em http://localhost:3000/restaurante, escolha a plataforma e cadastre o produto com nome, categoria, preço e quantidade. A plataforma mostra o **ID** gerado para ele (ex.: `SKU-123-ABC` no iFood, `145-789` na Rappi). Depois, no Gerêncio, abra **Estoque → Vincular produto**, selecione as plataformas, cole o ID de cada uma e use **Conferir**. Informe o preço e a quantidade que valem para todas as plataformas e clique em **Vincular produto**. O botão **Editar** de cada produto permite mudar nome, categoria e preço, vincular ou desvincular IDs e excluir o produto.
 3. Edite uma quantidade e clique em **Salvar ajustes**. Recarregue a página e confirme que o saldo permanece.
 4. Abra **Pedidos → Novo pedido**. Escolha restaurante, cliente, canal, pagamento, retirada ou entrega e produtos. O servidor calcula o preço dos pedidos de balcão/WhatsApp com o catálogo salvo.
 5. O pedido aparece como **Novo**, ainda sem baixar o saldo. Clique em **Aceitar pedido**: o status vira **Preparando** e as unidades são descontadas.
@@ -48,8 +48,8 @@ O dashboard consulta novamente as APIs a cada dez segundos. O estoque suspende e
 - Novos pedidos não podem misturar produtos de restaurantes diferentes. Pedidos antigos são associados ao restaurante quando todos os itens pertencem à mesma loja; casos ambíguos ficam sem associação.
 - Aceite e baixa são atômicos. Repetir o mesmo status não desconta novamente. Ajustes de saldo usam versão para evitar sobrescrever uma venda simultânea.
 - Cancelamento com devolução é permitido antes da saída. Após a saída, o fluxo disponível é confirmar a entrega; devoluções posteriores exigem uma regra de negócio futura.
-- Produtos usados em pedidos não podem ser apagados pela API de produtos. Zere o saldo para impedir novas vendas manuais.
-- O saldo salvo é local ao Gerôncio. O envio do saldo e de alterações de status para iFood e demais plataformas não foi implementado nesta etapa.
+- **Editar → Excluir produto** arquiva o produto em vez de apagá-lo: ele sai do estoque, do cardápio do WhatsApp e de novos pedidos e fica **indisponível** nas plataformas vinculadas, sem sumir delas. Continua nos pedidos antigos e nos relatórios. Se o restaurante repuser unidades no portal de uma plataforma, ele volta ao estoque do Gerêncio. Pela API, `DELETE /produtos/:id` continua recusando produtos que aparecem em pedidos.
+- O saldo e o preço são enviados às plataformas vinculadas pela sincronização descrita em [Vincular produtos das plataformas](#vincular-produtos-das-plataformas). O envio de alterações de status de pedido para iFood e demais plataformas não foi implementado nesta etapa.
 - Sem internet, pedidos manuais e estoque funcionam com o frontend disponível e as APIs e o Postgres locais em execução. Não há fila offline no navegador nem garantia de primeira abertura sem os arquivos do frontend disponíveis. Integrações externas precisam de conexão.
 
 ## Testes automatizados com banco separado
@@ -73,3 +73,27 @@ pnpm lint
 pnpm exec tsc --noEmit
 pnpm exec expo export --platform web
 ```
+
+## Vincular produtos das plataformas
+
+O mock tem duas páginas: http://localhost:3000 é o **app do cliente**, que faz pedidos, e http://localhost:3000/restaurante é o **portal do restaurante**, onde cada plataforma (iFood, Rappi, Uber Eats, 99 Food e Keeta) tem seu cardápio. O app do cliente lê o cardápio e o estoque da plataforma escolhida, mesmo antes de o produto ser vinculado no Gerêncio.
+
+Com o produto vinculado, o saldo e o preço valem para todas as plataformas: a `api-integracao` envia a quantidade e o preço do Gerêncio para as plataformas vinculadas a cada poucos segundos, sempre que algo muda. No portal, o produto aparece como **Vinculado ao Gerêncio**, e o estoque e o preço mudados lá vão para o Gerêncio, que repassa às outras plataformas.
+
+Comportamentos esperados:
+
+1. **Vincular:** a quantidade e o preço informados no Gerêncio chegam a todas as plataformas vinculadas, mesmo que estivessem diferentes em cada uma.
+2. **Pedido no app do cliente:** a plataforma do pedido desconta o próprio estoque na hora. No Gerêncio, o pedido chega como **Novo** e as unidades ficam **reservadas**: o saldo salvo não muda (a baixa continua no aceite), mas as outras plataformas recebem o saldo menos a reserva. A página de Estoque mostra "Nas plataformas: N un. (X reservadas em pedidos ainda não aceitos)".
+3. **Aceite:** baixa o estoque do Gerêncio; o saldo das plataformas não muda, porque já estava reservado.
+4. **Cancelamento antes do aceite:** a reserva é desfeita e as plataformas recebem as unidades de volta.
+5. **Ajuste manual ou mudança de preço no Gerêncio:** chega a todas as plataformas vinculadas.
+6. **Pedido acima do estoque:** o app do cliente mostra "Acima do limite do estoque" no item e, ao finalizar, "Erro ao realizar pedido", porque a API do mock recusa o pedido.
+7. **Desvincular** (em Editar): a plataforma volta a controlar o estoque daquele produto.
+8. **Estoque zero ou produto excluído no Gerêncio:** o produto aparece como **Indisponível** no portal e no app do cliente, que não deixa adicioná-lo; um pedido enviado direto à API do mock é recusado com "X está indisponível no iFood". Ele só some das plataformas quando é excluído no portal.
+9. **Estoque ou preço mudado no portal:** vai para o Gerêncio e para as outras plataformas vinculadas. O número digitado é o disponível para venda: com unidades reservadas, o saldo do Gerêncio fica esse número mais a reserva. Se a `api-integracao` estiver fora do ar, o portal avisa e nada muda.
+10. **Repor estoque no portal de um produto excluído no Gerêncio:** ele volta ao estoque do Gerêncio com esse saldo, e todas as plataformas vinculadas voltam a vendê-lo.
+11. **Vincular de novo o ID de um produto excluído:** o ID passa para o produto novo; as outras plataformas do produto excluído continuam indisponíveis.
+
+O botão **Sincronizar agora**, no Estoque, reenvia tudo; use-o se a `api-integracao` ficou fora do ar ou se alguém mudou um valor direto no banco do mock.
+
+Limitações desta etapa: o 99 Food e o Keeta recebem a sincronização, mas os pedidos deles ainda não chegam ao Gerêncio (sem adaptador na `api-integracao`); a situação da sincronização fica em memória na `api-integracao` e é reenviada por completo quando ela reinicia; o portal do restaurante ainda não pede credenciais da loja; o nome do produto não é sincronizado (cada plataforma mostra o nome cadastrado nela).

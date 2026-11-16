@@ -3,6 +3,37 @@ import { db, parseId, ErroOperacao, resolverRestauranteId } from '@geroncio/shar
 
 const routes = Router()
 
+// A api-integracao e o mock procuram o mapeamento por estes identificadores,
+// então "iFood", "Uber Eats" ou "99 Food" são gravados como "ifood", "ubereats", "99food".
+const PLATAFORMAS: Record<string, string> = {
+  ifood: 'ifood',
+  rappi: 'rappi',
+  ubereats: 'ubereats',
+  uber: 'ubereats',
+  '99food': '99food',
+  '99': '99food',
+  keeta: 'keeta',
+}
+
+const NOME_PLATAFORMA: Record<string, string> = {
+  ifood: 'iFood',
+  rappi: 'Rappi',
+  ubereats: 'Uber Eats',
+  '99food': '99 Food',
+  keeta: 'Keeta',
+}
+
+const NOME_CANAL: Record<string, string> = { ...NOME_PLATAFORMA, balcao: 'Balcão', whatsapp: 'WhatsApp' }
+
+const ROTULO_STATUS: Record<string, string> = {
+  novo: 'novo', em_preparo: 'em preparo', pronto: 'pronto', saiu_para_entrega: 'saiu para entrega', entregue: 'entregue', cancelado: 'cancelado',
+}
+
+function normalizarPlataforma(valor: unknown) {
+  if (typeof valor !== 'string') return null
+  return PLATAFORMAS[valor.trim().toLowerCase().replace(/[\s_-]+/g, '')] ?? null
+}
+
 // --- PRODUTOS ---
 
 routes.post('/produtos', async (req, res) => {
@@ -49,11 +80,80 @@ routes.post('/produtos', async (req, res) => {
   }
 })
 
+// VINCULAR PRODUTO: o restaurante cadastra o produto em cada plataforma de delivery, que gera um ID
+// para ele. Aqui esses IDs são ligados a um único produto do Gerêncio, com o estoque e o preço que
+// valem para todas as plataformas. A api-integracao envia esses valores para as plataformas vinculadas.
+routes.post('/produtos/vincular', async (req, res) => {
+  const { nome, categoria, preco, quantidade, vinculos } = req.body
+  const parsedPreco = typeof preco === 'string' ? Number(preco.replace(',', '.')) : Number(preco)
+
+  if (typeof nome !== 'string' || !nome.trim() || nome.trim().length > 100 ||
+      (categoria !== undefined && categoria !== null && typeof categoria !== 'string') ||
+      preco === null || preco === undefined || preco === '' || !Number.isFinite(parsedPreco) || parsedPreco < 0 || parsedPreco > 99_999_999.99 ||
+      !Number.isInteger(quantidade) || quantidade < 0 || quantidade > 1_000_000) {
+    res.status(400).json({ error: 'Informe nome, preço válido e quantidade inteira entre zero e 1.000.000.' })
+    return
+  }
+  if (!Array.isArray(vinculos) || vinculos.length === 0 || vinculos.length > Object.keys(NOME_PLATAFORMA).length) {
+    res.status(400).json({ error: 'Selecione ao menos uma plataforma e informe o ID do produto nela.' })
+    return
+  }
+  const lista = vinculos.map((vinculo: any) => ({
+    plataforma: normalizarPlataforma(vinculo?.plataforma),
+    idExternoApp: typeof vinculo?.idExternoApp === 'string' ? vinculo.idExternoApp.trim() : '',
+  }))
+  const invalido = lista.find((v) => !v.plataforma || !v.idExternoApp || v.idExternoApp.length > 100)
+  if (invalido) {
+    res.status(400).json({ error: invalido.plataforma
+      ? `Informe o ID do produto no ${NOME_PLATAFORMA[invalido.plataforma]}.`
+      : 'Plataforma inválida. Use ifood, rappi, ubereats, 99food ou keeta.' })
+    return
+  }
+  if (new Set(lista.map((v) => v.plataforma)).size !== lista.length) {
+    res.status(400).json({ error: 'Cada plataforma pode aparecer uma vez só no vínculo.' })
+    return
+  }
+
+  try {
+    const restauranteId = await resolverRestauranteId()
+    const produto = await db.$transaction(async (tx) => {
+      // Um ID de plataforma aponta para um único produto, senão a integração não sabe qual baixar.
+      const existentes = await tx.mapeamentoApp.findMany({
+        where: { OR: lista.map((v) => ({ plataforma: { equals: v.plataforma!, mode: 'insensitive' as const }, idExternoApp: v.idExternoApp })) },
+        include: { produto: true },
+      })
+      const emUso = existentes.find((m) => !m.produto.arquivadoEm)
+      if (emUso) {
+        const plataforma = normalizarPlataforma(emUso.plataforma) ?? emUso.plataforma
+        throw new ErroOperacao(409, `O ID ${emUso.idExternoApp} do ${NOME_PLATAFORMA[plataforma] ?? plataforma} já está vinculado a ${emUso.produto.nome}.`)
+      }
+      // IDs que eram de produtos excluídos passam para o produto novo.
+      if (existentes.length > 0) await tx.mapeamentoApp.deleteMany({ where: { id: { in: existentes.map((m) => m.id) } } })
+      return tx.produto.create({
+        data: {
+          nome: nome.trim(),
+          categoria: typeof categoria === 'string' && categoria.trim() ? categoria.trim() : 'Sem categoria',
+          preco: parsedPreco,
+          quantidade,
+          restaurante: { connect: { id: restauranteId } },
+          mapeamentos: { create: lista.map((v) => ({ plataforma: v.plataforma!, idExternoApp: v.idExternoApp })) },
+        },
+        include: { restaurante: true, mapeamentos: true },
+      })
+    })
+    res.status(201).json(produto)
+  } catch (error: any) {
+    if (error instanceof ErroOperacao) { res.status(error.status).json({ error: error.message }); return }
+    res.status(500).json({ error: 'Erro ao vincular produto', detalhe: error.message })
+  }
+})
+
 routes.get('/produtos', async (req, res) => {
   const restauranteId = req.query.restauranteId === undefined ? undefined : parseId(String(req.query.restauranteId))
   if (restauranteId === null) { res.status(400).json({ error: 'restauranteId inválido' }); return }
+  // Produtos arquivados saíram do estoque; continuam só nos pedidos e relatórios.
   const produtos = await db.produto.findMany({
-    where: restauranteId ? { restauranteId } : {},
+    where: { arquivadoEm: null, ...(restauranteId ? { restauranteId } : {}) },
     include: { restaurante: true },
     orderBy: { nome: 'asc' },
   })
@@ -75,7 +175,7 @@ routes.patch('/estoque', async (req, res) => {
     const produtos = await db.$transaction(async (tx) => {
       for (const ajuste of [...ajustes].sort((a, b) => a.produtoId - b.produtoId)) {
         const atualizado = await tx.produto.updateMany({
-          where: { id: ajuste.produtoId, versaoEstoque: ajuste.versaoEstoque },
+          where: { id: ajuste.produtoId, versaoEstoque: ajuste.versaoEstoque, arquivadoEm: null },
           data: { quantidade: ajuste.quantidade, versaoEstoque: { increment: 1 } },
         })
         if (atualizado.count !== 1) {
@@ -119,7 +219,7 @@ routes.put('/produtos/:id', async (req, res) => {
   }
 
   const produtoExistente = await db.produto.findUnique({ where: { id } })
-  if (!produtoExistente) {
+  if (!produtoExistente || produtoExistente.arquivadoEm) {
     res.status(404).json({ error: 'Produto não encontrado' })
     return
   }
@@ -160,7 +260,7 @@ routes.patch('/produtos/:id', async (req, res) => {
   }
 
   const produtoExistente = await db.produto.findUnique({ where: { id } })
-  if (!produtoExistente) {
+  if (!produtoExistente || produtoExistente.arquivadoEm) {
     res.status(404).json({ error: 'Produto não encontrado' })
     return
   }
@@ -210,32 +310,50 @@ routes.delete('/produtos/:id', async (req, res) => {
     return
   }
 
-  if (await db.itemPedido.count({ where: { produtoId: id } })) {
-    res.status(409).json({ error: 'Produto usado em pedidos não pode ser excluído. Ajuste o estoque para zero' })
+  // Os pedidos guardam o histórico de vendas (Relatórios), então o produto deles não pode sumir.
+  // Entregues e cancelados não aparecem na fila do painel, por isso a mensagem diz quais são.
+  const filtroPedidos = { itens: { some: { produtoId: id } } }
+  const total = await db.pedido.count({ where: filtroPedidos })
+  if (total > 0) {
+    const pedidos = await db.pedido.findMany({ where: filtroPedidos, select: { id: true, status: true, app: true }, orderBy: { id: 'desc' }, take: 5 })
+    const lista = pedidos.map((p) => `#${p.id} (${ROTULO_STATUS[p.status] ?? p.status}, ${NOME_CANAL[p.app.toLowerCase()] ?? p.app})`).join(', ')
+    res.status(409).json({
+      error: `${produtoExistente.nome} aparece em ${total === 1 ? '1 pedido' : `${total} pedidos`}: ${lista}${total > pedidos.length ? ' e outros' : ''}. ` +
+        'Para não apagar o histórico de vendas, ele não pode ser apagado de vez. Arquive-o para tirá-lo do estoque.',
+    })
     return
   }
   await db.produto.delete({ where: { id } })
   res.status(204).send()
 })
 
+// ARQUIVAR PRODUTO: é a exclusão feita pelo painel. Ele some da lista de estoque, do cardápio do
+// WhatsApp e de novos pedidos, mas continua nos pedidos antigos e nos relatórios. Os vínculos com as
+// plataformas ficam: o sincronizador manda estoque zero, então ele aparece como indisponível nelas,
+// e se o restaurante repuser unidades no portal de uma plataforma, ele volta ao estoque do Gerêncio.
+routes.post('/produtos/:id/arquivar', async (req, res) => {
+  const id = parseId(req.params.id)
+  if (id === null) {
+    res.status(400).json({ error: 'Id inválido' })
+    return
+  }
+
+  try {
+    const produto = await db.$transaction(async (tx) => {
+      const existente = await tx.produto.findUnique({ where: { id } })
+      if (!existente) throw new ErroOperacao(404, 'Produto não encontrado')
+      if (existente.arquivadoEm) return existente
+      // A versão muda para que um ajuste de saldo aberto em outra aba seja recusado.
+      return tx.produto.update({ where: { id }, data: { arquivadoEm: new Date(), versaoEstoque: { increment: 1 } } })
+    })
+    res.json(produto)
+  } catch (error: any) {
+    if (error instanceof ErroOperacao) { res.status(error.status).json({ error: error.message }); return }
+    res.status(500).json({ error: 'Erro ao arquivar produto', detalhe: error.message })
+  }
+})
+
 // --- MAPEAMENTO APP ---
-
-// A api-integracao e o mock procuram o mapeamento por estes identificadores,
-// então "iFood", "Uber Eats" ou "99 Food" são gravados como "ifood", "ubereats", "99food".
-const PLATAFORMAS: Record<string, string> = {
-  ifood: 'ifood',
-  rappi: 'rappi',
-  ubereats: 'ubereats',
-  uber: 'ubereats',
-  '99food': '99food',
-  '99': '99food',
-  keeta: 'keeta',
-}
-
-function normalizarPlataforma(valor: unknown) {
-  if (typeof valor !== 'string') return null
-  return PLATAFORMAS[valor.trim().toLowerCase().replace(/[\s_-]+/g, '')] ?? null
-}
 
 // 1. Criar novo mapeamento de produto para plataforma externa
 routes.post('/mapeamentos', async (req, res) => {
@@ -255,7 +373,7 @@ routes.post('/mapeamentos', async (req, res) => {
       where: { id: parsedProdutoId },
     })
 
-    if (!produtoExistente) {
+    if (!produtoExistente || produtoExistente.arquivadoEm) {
       res.status(404).json({ error: 'Produto informado não existe.' })
       return
     }
@@ -269,23 +387,28 @@ routes.post('/mapeamentos', async (req, res) => {
       include: { produto: true },
     })
     const codigoEmUso = conflitos.find((m) => m.idExternoApp === idExternoApp)
-    if (codigoEmUso) {
+    if (codigoEmUso && !codigoEmUso.produto.arquivadoEm) {
       res.status(409).json({ error: `O código ${idExternoApp} já está ligado a ${codigoEmUso.produto.nome} nesta plataforma.` })
       return
     }
-    if (conflitos.length > 0) {
-      res.status(409).json({ error: `Este produto já tem o código ${conflitos[0]!.idExternoApp} nesta plataforma. Remova-o antes de cadastrar outro.` })
+    const codigoAtual = conflitos.find((m) => m.produtoId === parsedProdutoId)
+    if (codigoAtual) {
+      res.status(409).json({ error: `Este produto já tem o código ${codigoAtual.idExternoApp} nesta plataforma. Remova-o antes de cadastrar outro.` })
       return
     }
 
-    const mapeamento = await db.mapeamentoApp.create({
-      data: {
-        plataforma,
-        idExternoApp,
-        produto: {
-          connect: { id: parsedProdutoId },
+    // Um código que era de um produto excluído passa para este.
+    const mapeamento = await db.$transaction(async (tx) => {
+      if (codigoEmUso) await tx.mapeamentoApp.delete({ where: { id: codigoEmUso.id } })
+      return tx.mapeamentoApp.create({
+        data: {
+          plataforma,
+          idExternoApp,
+          produto: {
+            connect: { id: parsedProdutoId },
+          },
         },
-      },
+      })
     })
 
     res.status(201).json(mapeamento)

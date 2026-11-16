@@ -398,7 +398,8 @@ type FieldRefInputType<Model, FieldType> = Model extends never ? never : FieldRe
 
 export const ModelName = {
   Pedido: 'Pedido',
-  Evento: 'Evento'
+  Evento: 'Evento',
+  ProdutoPlataforma: 'ProdutoPlataforma'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -414,7 +415,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "pedido" | "evento"
+    modelProps: "pedido" | "evento" | "produtoPlataforma"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -566,6 +567,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    ProdutoPlataforma: {
+      payload: Prisma.$ProdutoPlataformaPayload<ExtArgs>
+      fields: Prisma.ProdutoPlataformaFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.ProdutoPlataformaFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProdutoPlataformaPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.ProdutoPlataformaFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProdutoPlataformaPayload>
+        }
+        findFirst: {
+          args: Prisma.ProdutoPlataformaFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProdutoPlataformaPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.ProdutoPlataformaFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProdutoPlataformaPayload>
+        }
+        findMany: {
+          args: Prisma.ProdutoPlataformaFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProdutoPlataformaPayload>[]
+        }
+        create: {
+          args: Prisma.ProdutoPlataformaCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProdutoPlataformaPayload>
+        }
+        createMany: {
+          args: Prisma.ProdutoPlataformaCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.ProdutoPlataformaCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProdutoPlataformaPayload>[]
+        }
+        delete: {
+          args: Prisma.ProdutoPlataformaDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProdutoPlataformaPayload>
+        }
+        update: {
+          args: Prisma.ProdutoPlataformaUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProdutoPlataformaPayload>
+        }
+        deleteMany: {
+          args: Prisma.ProdutoPlataformaDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.ProdutoPlataformaUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.ProdutoPlataformaUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProdutoPlataformaPayload>[]
+        }
+        upsert: {
+          args: Prisma.ProdutoPlataformaUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProdutoPlataformaPayload>
+        }
+        aggregate: {
+          args: Prisma.ProdutoPlataformaAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateProdutoPlataforma>
+        }
+        groupBy: {
+          args: Prisma.ProdutoPlataformaGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.ProdutoPlataformaGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.ProdutoPlataformaCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.ProdutoPlataformaCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -652,6 +727,22 @@ export const EventoScalarFieldEnum = {
 } as const
 
 export type EventoScalarFieldEnum = (typeof EventoScalarFieldEnum)[keyof typeof EventoScalarFieldEnum]
+
+
+export const ProdutoPlataformaScalarFieldEnum = {
+  id: 'id',
+  plataforma: 'plataforma',
+  idExterno: 'idExterno',
+  nome: 'nome',
+  categoria: 'categoria',
+  precoCentavos: 'precoCentavos',
+  quantidade: 'quantidade',
+  sincronizadoEm: 'sincronizadoEm',
+  criadoEm: 'criadoEm',
+  atualizadoEm: 'atualizadoEm'
+} as const
+
+export type ProdutoPlataformaScalarFieldEnum = (typeof ProdutoPlataformaScalarFieldEnum)[keyof typeof ProdutoPlataformaScalarFieldEnum]
 
 
 export const SortOrder = {
@@ -986,6 +1077,7 @@ export type PrismaClientOptions = PrismaClientOptionsWithAccelerateUrl | PrismaC
 export type GlobalOmitConfig = {
   pedido?: Prisma.PedidoOmit
   evento?: Prisma.EventoOmit
+  produtoPlataforma?: Prisma.ProdutoPlataformaOmit
 }
 
 /* Types for Logging */

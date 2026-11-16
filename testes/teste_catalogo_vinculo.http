@@ -1,0 +1,72 @@
+### Catálogo das plataformas (mock) e vinculação no Gerêncio
+# Suba o backend (pnpm dev em backend/) e o mock antes. O portal do restaurante
+# (http://localhost:3000/restaurante) faz os passos 1 e 2 pela tela.
+@mock = http://localhost:3333
+@produtos = http://localhost:3004
+@integracao = http://localhost:3005/api
+
+### 1. Cadastrar produto no cardápio do iFood (a plataforma devolve o idExterno)
+POST {{mock}}/catalogo
+Content-Type: application/json
+
+{
+  "plataforma": "ifood",
+  "nome": "X-Burguer",
+  "categoria": "Lanches",
+  "preco": "25,90",
+  "quantidade": 10
+}
+
+### 2. Cardápio de uma plataforma (o app do cliente lê daqui)
+GET {{mock}}/catalogo?plataforma=ifood
+
+### Copie o idExterno da resposta do passo 1
+@idIfood = SKU-000-AAA
+
+### 3. Conferir o ID pela api-integracao (usado em "Vincular produto")
+GET {{integracao}}/catalogo/ifood/{{idIfood}}
+
+### 4. Vincular no Gerêncio: estoque e preço daqui valem para todas as plataformas
+POST {{produtos}}/produtos/vincular
+Content-Type: application/json
+
+{
+  "nome": "X-Burguer",
+  "categoria": "Lanches",
+  "preco": 28,
+  "quantidade": 20,
+  "vinculos": [
+    { "plataforma": "ifood", "idExternoApp": "{{idIfood}}" }
+  ]
+}
+
+### 5. Em até 3 s, a plataforma recebe quantidade 20 e preço 2800 (sincronizadoEm preenchido)
+GET {{mock}}/catalogo/ifood/{{idIfood}}
+
+### 6. Situação da sincronização (vínculos e reservas de pedidos ainda não aceitos)
+GET {{integracao}}/sincronizacao/estoque
+
+### 7. Reenviar estoque e preço de todos os produtos vinculados
+POST {{integracao}}/sincronizacao/estoque
+
+### 8. Depois de vinculado, estoque e preço mudados no portal vão para o Gerêncio e as outras plataformas
+# A resposta traz "gerencio": { "vinculado": true, "restaurado": false }
+PATCH {{mock}}/catalogo/ifood/{{idIfood}}
+Content-Type: application/json
+
+{ "quantidade": 12, "preco": "29,90" }
+
+### 9. O que o mock envia ao Gerêncio nesse caso (quantidade é o disponível para venda)
+POST {{integracao}}/webhooks/catalogo
+Content-Type: application/json
+
+{ "plataforma": "ifood", "idExterno": "{{idIfood}}", "quantidade": 12, "precoCentavos": 2990 }
+
+### 10. Excluir o produto no Gerêncio (troque 1 pelo id): fica indisponível (quantidade 0) nas plataformas
+POST {{produtos}}/produtos/1/arquivar
+
+### 11. Repor unidades no portal traz o produto de volta ao Gerêncio ("restaurado": true)
+PATCH {{mock}}/catalogo/ifood/{{idIfood}}
+Content-Type: application/json
+
+{ "quantidade": 5 }
