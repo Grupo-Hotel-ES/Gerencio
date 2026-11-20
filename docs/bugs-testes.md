@@ -2,8 +2,7 @@
 
 ## BUG-TESTE-001 — Evento Stripe de falha regride pagamento confirmado
 
-- Situação: corrigido em 09/11/2026, com validação local completa no PostgreSQL isolado em Docker. A expectativa do teste de regressão foi preservada.
-- Reproduzido novamente em 09/11/2026, após o rebase da `lucas` sobre a develop, na revisão `42ed2c9`, com PostgreSQL 16 em Docker. A suíte completa terminou com 20 cenários aprovados e este cenário reprovado (`falhou !== pago`); nenhum cenário foi ignorado. A aplicação e as asserções permaneceram inalteradas.
+- Situação: aberto, reproduzido em 02/11/2026; aplicação não corrigida nesta entrega de testes.
 - Prioridade: alta, por inconsistência no estado financeiro.
 - Teste: `Pagamento de pedido > quando chega uma falha atrasada após a confirmação, então preserva o pagamento como pago`, em `backend/testes/fluxos-criticos.test.ts`.
 - Rota: `POST /api/webhooks/stripe`.
