@@ -15,6 +15,7 @@ enum StatusEntregador {
 }
 
 enum StatusPedido {
+  em_verificacao
   novo
   em_preparo
   pronto
@@ -166,12 +167,19 @@ model Cliente {
   pedidos     Pedido[]
 }
 
+model VerificacaoCaixa {
+  chave String @id @default(uuid()) @db.Uuid
+  usada Boolean @default(false)
+}
+
 model Pedido {
   id              Int          @id @default(autoincrement())
   pedidoExternoId String?      @map("pedido_externo_id")
   restauranteId   Int?         @map("restaurante_id")
   restaurante     Restaurante? @relation(fields: [restauranteId], references: [id])
   estoqueBaixado  Boolean      @default(false) @map("estoque_baixado")
+  chaveVerificacao String?     @unique @db.Uuid @map("chave_verificacao")
+  versaoVerificacao Int        @default(0) @map("versao_verificacao")
   // O nome, o endereço e o telefone do cliente ficam em Cliente. Só pedidos de
   // plataforma que chegam sem nome do cliente ficam sem vínculo.
   clienteId       Int?         @map("cliente_id")

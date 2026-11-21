@@ -51,14 +51,58 @@ test('Pedidos e estoque pelas APIs, com PostgreSQL real', async (t) => {
     assert.equal(resposta.status, 201, JSON.stringify(resposta.dados))
     return resposta.dados as { id: number; quantidade: number; versaoEstoque: number }
   }
-  async function pedido(itens: { produtoId: number; quantidade: number }[]) {
+  async function pedido(itens: { produtoId: number; quantidade: number }[], chaveVerificacao?: string) {
     return requisitar(apiPedidos, '/api/pedidos', 'POST', {
-      nomeCliente: 'Cliente de teste', restauranteId: restaurantes[0], app: 'balcao', metodoPagamento: 'dinheiro',
+      chaveVerificacao, nomeCliente: 'Cliente de teste', restauranteId: restaurantes[0], app: 'balcao', metodoPagamento: 'dinheiro',
       enderecoDestino: 'Retirada no balcão', cepDestino: '', preco: 0.01, itens,
     })
   }
   const mudar = (id: number, status: string) => requisitar(apiPedidos, `/api/pedidos/${id}/status`, 'PATCH', { status })
   const saldo = (id: number) => db.produto.findUniqueOrThrow({ where: { id } })
+
+  await t.test('Quando dois caixas retomam a mesma revisão, então só a versão atual altera a reserva', async () => {
+    const a = await produto(5)
+    const b = await produto(1)
+    const chave = (await requisitar(apiPedidos, '/api/verificacoes/chave', 'POST')).dados.chave
+    const criar = () => pedido([{ produtoId: a.id, quantidade: 2 }], chave)
+    const [primeiro, repetido] = await Promise.all([criar(), criar()])
+    assert.equal(primeiro.status, 201)
+    assert.equal(repetido.status, 201)
+    const id = primeiro.dados.id
+    assert.equal(repetido.dados.id, id)
+    const revisar = (acao: string, versao: number, itens?: unknown) => requisitar(apiPedidos,
+      `/api/pedidos/${id}/verificacao`, 'PATCH', { acao, versao, itens })
+    const abertos = await requisitar(apiPedidos, '/api/pedidos?status=em_verificacao')
+    assert.ok(abertos.dados.some((p: { id: number }) => p.id === id))
+    assert.equal((await saldo(a.id)).quantidade, 3)
+    assert.equal((await revisar('alterar', 0, [{ produtoId: b.id, quantidade: 2 }])).status, 409)
+    assert.equal((await saldo(a.id)).quantidade, 3)
+    const trocar = () => revisar('alterar', 0, [{ produtoId: b.id, quantidade: 1 }])
+    const respostas = await Promise.all([trocar(), trocar()])
+    assert.deepEqual(respostas.map(r => r.status).sort(), [200, 409])
+    assert.equal((await saldo(a.id)).quantidade, 5)
+    assert.equal((await saldo(b.id)).quantidade, 0)
+    assert.equal((await revisar('cancelar', 1)).status, 200)
+    assert.equal((await revisar('cancelar', 1)).status, 409)
+    assert.equal(await db.pedido.findUnique({ where: { id } }), null)
+    assert.equal((await criar()).status, 409)
+    assert.equal((await saldo(b.id)).quantidade, 1)
+  })
+
+  await t.test('Quando o cliente confirma a revisão, então o mesmo ID entra na fila sem novo débito', async () => {
+    const a = await produto(1)
+    const chave = (await requisitar(apiPedidos, '/api/verificacoes/chave', 'POST')).dados.chave
+    const { dados } = await pedido([{ produtoId: a.id, quantidade: 1 }], chave)
+    const confirmar = () => requisitar(apiPedidos, `/api/pedidos/${dados.id}/verificacao`, 'PATCH', { acao: 'confirmar', versao: 0 })
+    const resposta = await confirmar()
+    assert.equal(resposta.status, 200)
+    assert.equal(resposta.dados.id, dados.id)
+    assert.equal(resposta.dados.status, 'novo')
+    assert.equal((await confirmar()).status, 409)
+    assert.equal((await mudar(dados.id, 'em_preparo')).status, 200)
+    assert.equal((await saldo(a.id)).versaoEstoque, 1)
+    assert.equal((await saldo(a.id)).quantidade, 0)
+  })
 
   await t.test('Manual: calcula total no servidor, agrupa itens e filtra restaurante', async () => {
     const p = await produto(10)
@@ -68,7 +112,7 @@ test('Pedidos e estoque pelas APIs, com PostgreSQL real', async (t) => {
     assert.equal(resposta.dados.itens.length, 1)
     assert.equal(resposta.dados.itens[0].quantidade, 3)
     assert.equal(resposta.dados.restaurante.id, restaurantes[0])
-    assert.equal((await saldo(p.id)).quantidade, 10)
+    assert.equal((await saldo(p.id)).quantidade, 7)
     const lista = await requisitar(apiPedidos, `/api/pedidos?restauranteId=${restaurantes[1]}`)
     assert.deepEqual(lista.dados, [])
   })
@@ -90,21 +134,20 @@ test('Pedidos e estoque pelas APIs, com PostgreSQL real', async (t) => {
     assert.equal((await saldo(p.id)).quantidade, 10)
     assert.equal((await mudar(dados.id, 'em_preparo')).status, 409)
   })
-  await t.test('Estoque insuficiente reverte todos os itens e mantém pedido novo', async () => {
+  await t.test('Estoque insuficiente reverte todos os itens e a criação', async () => {
     const a = await produto(5)
     const b = await produto(0)
-    const { dados } = await pedido([{ produtoId: a.id, quantidade: 2 }, { produtoId: b.id, quantidade: 1 }])
-    assert.equal((await mudar(dados.id, 'em_preparo')).status, 409)
+    const resposta = await pedido([{ produtoId: a.id, quantidade: 2 }, { produtoId: b.id, quantidade: 1 }])
+    assert.equal(resposta.status, 409)
     assert.equal((await saldo(a.id)).quantidade, 5)
     assert.equal((await saldo(a.id)).versaoEstoque, 0)
-    assert.equal((await db.pedido.findUniqueOrThrow({ where: { id: dados.id } })).status, 'novo')
+    assert.equal(await db.pedido.count({ where: { itens: { some: { produtoId: a.id } } } }), 0)
   })
   await t.test('Dois pedidos concorrentes não consomem as mesmas unidades', async () => {
     const p = await produto(3)
-    const a = await pedido([{ produtoId: p.id, quantidade: 2 }])
-    const b = await pedido([{ produtoId: p.id, quantidade: 2 }])
-    const respostas = await Promise.all([mudar(a.dados.id, 'em_preparo'), mudar(b.dados.id, 'em_preparo')])
-    assert.deepEqual(respostas.map((r) => r.status).sort(), [200, 409], JSON.stringify(respostas))
+    const criar = () => pedido([{ produtoId: p.id, quantidade: 2 }])
+    const respostas = await Promise.all([criar(), criar()])
+    assert.deepEqual(respostas.map((r) => r.status).sort(), [201, 409], JSON.stringify(respostas))
     assert.equal((await saldo(p.id)).quantidade, 1)
   })
   await t.test('Aceites simultâneos do mesmo pedido não duplicam a baixa', async () => {
@@ -173,7 +216,7 @@ test('Pedidos e estoque pelas APIs, com PostgreSQL real', async (t) => {
     }
     const salvo = await processarNotificacao('ifood', adapter, notificacao, evento.id)
     assert.equal(salvo.restauranteId, restaurantes[0])
-    assert.equal((await saldo(p.id)).quantidade, 5)
+    assert.equal((await saldo(p.id)).quantidade, 3)
     assert.equal((await mudar(salvo.id, 'em_preparo')).status, 200)
     const repetido = await processarNotificacao('ifood', adapter, notificacao, evento.id)
     assert.equal(repetido.id, salvo.id)

@@ -17,7 +17,8 @@ import {
 } from '@/data/pedidos';
 import { useCores } from '@/hooks/use-cores';
 import { buscarConfigPagamento } from '@/services/api-pagamentos';
-import { atualizarStatus, listarPedidosAtivos } from '@/services/api-pedidos';
+import { atualizarStatus, listarPedidosAtivos, requisitar, type RevisaoCaixa } from '@/services/api-pedidos';
+import { RevisaoDoCaixa } from '@/components/dashboard/revisao-caixa';
 
 type Filtro = 'todos' | StatusAtivo;
 
@@ -45,6 +46,8 @@ export default function DashboardDePedidos() {
   const [buscando, setBuscando] = useState(false);
   const [busca, setBusca] = useState('');
   const [novoPedido, setNovoPedido] = useState(false);
+  const [abertos, setAbertos] = useState<RevisaoCaixa[]>([]);
+  const [revisao, setRevisao] = useState<RevisaoCaixa | null>(null);
   const [ocupados, setOcupados] = useState<number[]>([]);
   const [pagamentoOnline, setPagamentoOnline] = useState(false);
   const operacoes = useRef(new Set<number>());
@@ -65,9 +68,10 @@ export default function DashboardDePedidos() {
   const carregar = useCallback(async () => {
     const versao = ++consulta.current;
     try {
-      const dados = await listarPedidosAtivos();
+      const [dados, verificacoes] = await Promise.all([listarPedidosAtivos(), requisitar<RevisaoCaixa[]>('/pedidos?status=em_verificacao')]);
       if (versao !== consulta.current) return;
       setAtivos(dados);
+      setAbertos(verificacoes);
       setAtualizadoEm(new Date());
       setErro(null);
     } catch (e) {
@@ -131,10 +135,18 @@ export default function DashboardDePedidos() {
       subtitulo="Acompanhe a cozinha e as entregas, sem trocar de aplicativo."
       acao={<Botao rotulo="Novo pedido" icone="mais" variante="primario" onPress={() => setNovoPedido(true)} />}>
       {novoPedido && <FormularioPedido
-        onFechar={() => setNovoPedido(false)} onConcluir={() => {
+        onFechar={() => setNovoPedido(false)} onConcluir={(pedido) => {
+          if (pedido.status === 'em_verificacao') setRevisao(pedido);
           setNovoPedido(false); setFiltro('todos'); setCanal(null); setBusca('');
           carregar();
         }} />}
+      {revisao && <RevisaoDoCaixa key={`${revisao.id}-${revisao.versaoVerificacao}`} pedido={revisao} atualizar={setRevisao}
+        fechar={() => { setRevisao(null); carregar(); }} />}
+      {abertos.length > 0 && <View>
+        <Texto peso={600}>Abertos · Em verificação ({abertos.length})</Texto>
+        {abertos.map(p => <Botao key={p.id} rotulo={`Retomar #${p.id} · ${p.cliente?.nomeCliente ?? 'Balcão'} · Estoque reservado`}
+          onPress={() => { setNovoPedido(false); setRevisao(p); }} />)}
+      </View>}
       <Grade colunas={colunasResumo}>
         {resumo.map((item) => (
           <CartaoResumo key={item.rotulo} {...item} />

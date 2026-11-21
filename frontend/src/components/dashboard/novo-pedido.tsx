@@ -8,7 +8,7 @@ import { descreverCliente, type Cliente } from '@/data/clientes';
 import { formatarReais } from '@/data/pedidos';
 import { useCores } from '@/hooks/use-cores';
 import { buscarClientesSemelhantes } from '@/services/api-clientes';
-import { cotarFrete, criarPedido, type CotacaoFrete, type NovoPedido } from '@/services/api-pedidos';
+import { cotarFrete, criarPedido, requisitar, type CotacaoFrete, type NovoPedido, type RevisaoCaixa } from '@/services/api-pedidos';
 import { listarProdutos, type Produto } from '@/services/api-produtos';
 
 type CampoCliente = 'nome' | 'endereco';
@@ -18,7 +18,7 @@ type Sugestao = { campo: CampoCliente; clientes: Cliente[] };
 
 const mesmoTexto = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: () => void; onFechar: () => void }) {
+export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: (pedido: RevisaoCaixa) => void; onFechar: () => void }) {
   const cores = useCores();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [quantidades, setQuantidades] = useState<Record<number, number>>({});
@@ -42,6 +42,7 @@ export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: () => v
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const enviando = useRef(false);
+  const chave = useRef<string | null>(null);
 
   useEffect(() => {
     let ativo = true;
@@ -112,7 +113,9 @@ export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: () => v
     }
     enviando.current = true; setSalvando(true); setErro(null);
     try {
-      await criarPedido({
+      chave.current ??= (await requisitar<{ chave: string }>('/verificacoes/chave', { method: 'POST' })).chave;
+      const pedido = await criarPedido({
+        chaveVerificacao: chave.current,
         ...(clienteId !== null
           ? { clienteId }
           : { cliente: { nome: nomeCliente.trim(), endereco: enderecoCliente.trim(), telefone: telefone.trim() } }),
@@ -123,7 +126,7 @@ export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: () => v
           custoEntrega: cotacao.taxaEntrega, distanciaKm: cotacao.distanciaKm,
           latitude: cotacao.destino.latitude, longitude: cotacao.destino.longitude,
         }) });
-      onConcluir();
+      onConcluir(pedido);
     } catch (e) { setErro((e as Error).message); }
     finally { enviando.current = false; setSalvando(false); }
   };
@@ -198,10 +201,10 @@ export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: () => v
         <Texto cor="textoSecundario">Subtotal {formatarReais(subtotal)} + entrega {formatarReais(taxaEntrega)}</Texto>
       )}
       <Texto tamanho={20} peso={600}>Total: {formatarReais(total)}</Texto>
-      <Texto cor="textoSecundario">O pedido entra como novo. As unidades são reservadas ao aceitar na fila.</Texto>
+      <Texto cor="textoSecundario">Verifique o pedido para reservar os itens antes de conferir com o cliente.</Texto>
       {erro && <Texto cor="feedbackErro" accessibilityRole="alert">{erro}</Texto>}
       <View style={styles.linha}>
-        <Botao rotulo={salvando ? 'Criando…' : 'Criar pedido'} variante="primario" disabled={salvando || carregando || itens.length === 0} onPress={salvar} />
+        <Botao rotulo={salvando ? 'Verificando…' : 'Verificar pedido'} variante="primario" disabled={salvando || carregando || itens.length === 0} onPress={salvar} />
         <Botao rotulo="Fechar" disabled={salvando} onPress={onFechar} />
       </View>
     </Cartao>
