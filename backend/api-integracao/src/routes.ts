@@ -1,6 +1,6 @@
 import { Router, type Request } from 'express'
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { db, obterOuCriarCliente, prepararItensPedido, type Prisma } from '@geroncio/shared-db'
+import { db, debitarItensPedido, obterOuCriarCliente, prepararItensPedido, type Prisma } from '@geroncio/shared-db'
 import {
   NOME_PLATAFORMA, aplicarAlteracaoDaPlataforma, normalizarPlataforma, situacaoSincronizacao, sincronizarTudoAgora,
 } from './sincronizador-estoque'
@@ -365,6 +365,7 @@ async function salvarPedido(
       endereco: pedido.enderecoDestino,
     })
     const data: Prisma.PedidoCreateInput = {
+      estoqueBaixado: true,
       restaurante: { connect: { id: preparados.restauranteId } },
       pedidoExternoId: pedidoIdExterno,
       ...(cliente && { cliente: { connect: { id: cliente.id } } }),
@@ -378,6 +379,7 @@ async function salvarPedido(
       itens: { create: preparados.itens },
     }
     const salvo = await tx.pedido.create({ data })
+    await debitarItensPedido(tx, preparados.itens)
     await tx.eventoIntegracao.update({
       where: { id: eventoIntegracaoId },
       data: { status: 'processado', processadoEm: new Date(), ultimoErro: null, pedidoId: salvo.id },

@@ -38,12 +38,27 @@ export async function prepararItensPedido(tx: Prisma.TransactionClient, entrada:
 }
 
 const TRANSICOES: Record<StatusPedido, StatusPedido[]> = {
+  em_verificacao: [],
   novo: ['em_preparo', 'cancelado'],
   em_preparo: ['pronto', 'cancelado'],
   pronto: ['saiu_para_entrega', 'cancelado'],
   saiu_para_entrega: ['entregue'],
   entregue: [],
   cancelado: [],
+}
+
+export async function debitarItensPedido(tx: Prisma.TransactionClient, itens: { produtoId: number, quantidade: number }[]) {
+  for (const item of [...itens].sort((a, b) => a.produtoId - b.produtoId)) {
+    const baixa = await tx.produto.updateMany({
+      where: { id: item.produtoId, arquivadoEm: null, quantidade: { gte: item.quantidade } },
+      data: { quantidade: { decrement: item.quantidade }, versaoEstoque: { increment: 1 } },
+    })
+    if (baixa.count === 0) {
+      const produto = await tx.produto.findUnique({ where: { id: item.produtoId } })
+      const saldo = produto && !produto.arquivadoEm ? produto.quantidade : 0
+      throw new ErroOperacao(409, `Estoque insuficiente de ${produto?.nome ?? item.produtoId}: solicitados ${item.quantidade}, disponíveis ${saldo}`)
+    }
+  }
 }
 
 /** Aceite e baixa, ou cancelamento e devolução, são confirmados na mesma transação. */

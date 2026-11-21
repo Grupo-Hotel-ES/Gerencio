@@ -121,8 +121,15 @@ export async function cotarFrete(enderecoDestino: string, cepDestino: string) {
   });
 }
 
-export async function criarPedido(dados: NovoPedido): Promise<void> {
-  await requisitar('/pedidos', {
+export type RevisaoCaixa = {
+  id: number; status: string; versaoVerificacao: number; restauranteId: number;
+  cliente: { nomeCliente: string } | null; preco: string;
+  entrega: { custoEntrega: string } | null;
+  itens: { produtoId: number; quantidade: number; produto: { nome: string } }[];
+};
+
+export async function criarPedido(dados: NovoPedido & { chaveVerificacao: string }) {
+  return requisitar<RevisaoCaixa>('/pedidos', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados),
   });
 }
