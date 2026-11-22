@@ -1,6 +1,6 @@
+import { requisitar as requisitarPedidos } from './api-pedidos';
 import { type Motoboy, type StatusMotoboy } from '@/data/motoboys';
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_PEDIDOS_URL ?? 'http://localhost:3002/api';
 
 export type DadosNovoMotoboy = {
   nome: string;
@@ -20,32 +20,8 @@ export type DadosAtualizarMotoboy = {
   status?: StatusMotoboy;
 };
 
-type RespostaApiErro = {
-  error?: string;
-  detalhe?: string;
-};
-
 async function requisitar<T>(caminho: string, init?: RequestInit): Promise<T> {
-  const resposta = await fetch(`${BASE_URL}${caminho}`, init);
-
-  if (!resposta.ok) {
-    let mensagemErro = `Erro na requisição (${resposta.status})`;
-    try {
-      const corpoErro = (await resposta.json()) as RespostaApiErro;
-      if (corpoErro.error) {
-        mensagemErro = corpoErro.detalhe ? `${corpoErro.error}: ${corpoErro.detalhe}` : corpoErro.error;
-      }
-    } catch {
-      // Ignora erro de parse de JSON caso resposta não seja JSON
-    }
-    throw new Error(mensagemErro);
-  }
-
-  if (resposta.status === 204) {
-    return undefined as unknown as T;
-  }
-
-  return resposta.json();
+  return requisitarPedidos<T>(caminho, init);
 }
 
 /**
@@ -114,4 +90,110 @@ export async function excluirMotoboy(id: number): Promise<void> {
   await requisitar(`/entregadores/${id}`, {
     method: 'DELETE',
   });
+}
+
+export type StatusPagamentoEntrega = 'pendente' | 'pago';
+
+export type ResumoGanhosMotoboy = {
+  totalEntregas: number;
+  entregasPendentes: number;
+  entregasPagas: number;
+  valorPendenteAReceber: number;
+  valorJaPago: number;
+  valorTotalPeriodo: number;
+  taxaTotalCobrada: number;
+  distanciaTotalKm: number;
+  mediaPorEntrega: number;
+};
+
+export type GanhoDiarioMotoboy = {
+  data: string;
+  entregas: number;
+  valorPendente: number;
+  valorPago: number;
+  valorTotal: number;
+};
+
+export type EntregaMotoboyItem = {
+  id: number;
+  pedidoId: number;
+  entregadorId: number | null;
+  dataHora: string;
+  dia: string;
+  distanciaKm: number | null;
+  custoEntrega: number;
+  valorMotoboy: number;
+  statusPagamento: StatusPagamentoEntrega;
+  pagoEm: string | null;
+  pedido: {
+    id: number;
+    nomeCliente: string | null;
+    app: string;
+    enderecoDestino: string;
+    cepDestino: string;
+    status: string;
+    preco: number;
+    restauranteId: number | null;
+  };
+};
+
+export type RespostaExtratoMotoboy = {
+  entregador: {
+    id: number;
+    nome: string;
+    cpf: string;
+    telefone: string;
+    email: string;
+    status: 'disponivel' | 'em_entrega' | 'inativo' | null;
+  };
+  periodo: {
+    inicio: string | null;
+    fim: string | null;
+  };
+  resumo: ResumoGanhosMotoboy;
+  ganhosPorDia: GanhoDiarioMotoboy[];
+  entregas: EntregaMotoboyItem[];
+};
+
+export type RespostaResumoGeralMotoboys = {
+  periodo: { inicio: string | null; fim: string | null };
+  totalGeralPendente: number;
+  totalGeralPago: number;
+  totalGeralPeriodo: number;
+  motoboys: {
+    entregadorId: number;
+    nome: string;
+    telefone: string;
+    email: string;
+    status: 'disponivel' | 'em_entrega' | 'inativo' | null;
+    totalEntregas: number;
+    entregasPendentes: number;
+    entregasPagas: number;
+    valorPendenteAReceber: number;
+    valorJaPago: number;
+    valorTotalPeriodo: number;
+    distanciaTotalKm: number;
+  }[];
+};
+
+
+type FiltrosGanhos = { inicio?: string; fim?: string; statusPagamento?: StatusPagamentoEntrega; restauranteId?: number };
+function queryGanhos(filtros?: FiltrosGanhos) {
+  const params = new URLSearchParams();
+  for (const [chave, valor] of Object.entries(filtros ?? {})) {
+    if (valor !== undefined) params.set(chave, String(valor));
+  }
+  return params.size ? '?' + params.toString() : '';
+}
+export function buscarGanhosMotoboy(id: number, filtros?: FiltrosGanhos) {
+  return requisitar<RespostaExtratoMotoboy>('/entregas/motoboy/' + id + '/ganhos' + queryGanhos(filtros));
+}
+export function buscarResumoGeralMotoboys(filtros?: FiltrosGanhos) {
+  return requisitar<RespostaResumoGeralMotoboys>('/entregas/motoboys/resumo' + queryGanhos(filtros));
+}
+export function atualizarPagamentoEntrega(id: number, statusPagamento: StatusPagamentoEntrega) {
+  return requisitar('/entregas/' + id + '/pagamento', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ statusPagamento }) });
+}
+export function quitarEntregasMotoboy(id: number, periodo?: { inicio?: string; fim?: string }) {
+  return requisitar<{ quantidadeQuitada: number; valorTotalQuitado: number }>('/entregas/motoboy/' + id + '/quitar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(periodo ?? {}) });
 }

@@ -63,7 +63,12 @@ async function prepararPagamento(quantidade = 5) {
     restauranteId: restaurante.dados.id, nome: 'Espetinho', preco: '12.50', quantidade,
   })
   assert.equal(produto.status, 201, JSON.stringify(produto.dados))
-  const pedido = await requisitar(apiPedidos, '/api/pedidos', 'POST', {
+  // Pedidos legados podem ter recebido o link antes da implantação da baixa na entrada.
+  const pedido = quantidade === 0 ? { status: 201, dados: await db.pedido.create({ data: {
+    restauranteId: restaurante.dados.id, app: 'balcao', metodoPagamento: 'online', preco: 25,
+    enderecoDestino: 'Retirada no local', cepDestino: '',
+    itens: { create: { produtoId: produto.dados.id, quantidade: 2 } },
+  } }) } : await requisitar(apiPedidos, '/api/pedidos', 'POST', {
     restauranteId: restaurante.dados.id, nomeCliente: 'Cliente de integração',
     app: 'balcao', metodoPagamento: 'online', enderecoDestino: 'Retirada no local', cepDestino: '',
     itens: [{ produtoId: produto.dados.id, quantidade: 2 }],
@@ -649,9 +654,9 @@ describe('Pagamento de pedido', () => {
     assert.equal(dados.pagamento.status, 'falhou')
     assert.equal(dados.pagamento.pagoEm, null)
     assert.equal(dados.pedido.status, 'novo')
-    assert.equal(dados.pedido.estoqueBaixado, false)
-    assert.equal(dados.produto.quantidade, 5)
-    assert.equal(dados.produto.versaoEstoque, 0)
+    assert.equal(dados.pedido.estoqueBaixado, true)
+    assert.equal(dados.produto.quantidade, 3)
+    assert.equal(dados.produto.versaoEstoque, 1)
   })
 
   it('quando o pagamento é confirmado sem estoque, então preserva o pagamento como pago e mantém o pedido novo', async () => {

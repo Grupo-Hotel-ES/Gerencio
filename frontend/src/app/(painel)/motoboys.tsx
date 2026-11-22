@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { CartaoResumo, Grade, Pagina, useLarguraConteudo } from '@/components/dashboard/pagina';
@@ -51,24 +52,26 @@ export default function ControleDeMotoboys() {
   const [statusForm, setStatusForm] = useState<StatusMotoboy>('disponivel');
   const [erroForm, setErroForm] = useState<string | null>(null);
 
-  const carregar = useCallback(async () => {
+  useEffect(() => {
+    let ativo = true;
+    const carregar = async () => {
     try {
-      setCarregando(true);
       const lista = await listarMotoboys();
+      if (!ativo) return;
       setMotoboys(lista);
       setErroApi(null);
     } catch {
+      if (!ativo) return;
       // Fallback para massa de demonstração caso a API não esteja respondendo
       setMotoboys((atuais) => (atuais.length > 0 ? atuais : MOTOBOYS_DEMO));
       setErroApi('Não foi possível sincronizar com o backend. Exibindo dados locais.');
     } finally {
-      setCarregando(false);
+      if (ativo) setCarregando(false);
     }
-  }, []);
-
-  useEffect(() => {
+    };
     carregar();
-  }, [carregar]);
+    return () => { ativo = false; };
+  }, []);
 
   // Métricas calculadas
   const disponiveis = motoboys.filter((m) => m.status === 'disponivel').length;
@@ -530,6 +533,26 @@ export default function ControleDeMotoboys() {
                   <View style={styles.colunaAcoes}>
                     <Pressable
                       accessibilityRole="button"
+                      accessibilityLabel={`Ver ganhos de ${motoboy.nome}`}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/ganhos' as any,
+                          params: { motoboyId: String(motoboy.id) },
+                        })
+                      }
+                      style={[
+                        styles.botaoAcao,
+                        styles.botaoAcaoComTexto,
+                        { borderColor: cores.borda, backgroundColor: cores.superficie },
+                      ]}>
+                      <Icone nome="ganhos" tamanho={14} />
+                      <Texto tamanho={12} peso={600} cor="textoPrincipal">
+                        Ganhos
+                      </Texto>
+                    </Pressable>
+
+                    <Pressable
+                      accessibilityRole="button"
                       accessibilityLabel={`Editar ${motoboy.nome}`}
                       onPress={() => abrirFormularioEdicao(motoboy)}
                       style={[
@@ -644,7 +667,7 @@ const styles = StyleSheet.create({
     width: 140,
   },
   colunaAcoes: {
-    width: 150,
+    width: 230,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
@@ -657,6 +680,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  botaoAcaoComTexto: {
+    flexDirection: 'row',
+    gap: Espacamento.xsmall,
+    paddingHorizontal: Espacamento.medium,
   },
   cartaoFormulario: {
     padding: Espacamento.large,

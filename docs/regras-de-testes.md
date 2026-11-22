@@ -101,6 +101,8 @@ O workflow `.github/workflows/testes.yml` executa os testes em PRs e em pushes d
 
 ## Referências
 
+- [Política de testes do estoque compartilhado e da verificação no caixa](verificacao-do-pedido.md#política-de-testes-do-fluxo)
+
 - [Node.js: executor de testes e describe/it](https://nodejs.org/docs/latest-v24.x/api/test.html)
 - [Docker: execução de containers](https://docs.docker.com/reference/cli/docker/container/run/)
 - [Cobertura inicial e comportamentos aprovados](cobertura-testes.md)

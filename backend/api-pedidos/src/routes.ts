@@ -8,6 +8,7 @@ import {
   TipoFuncionario,
   ErroOperacao,
   prepararItensPedido,
+  debitarItensPedido,
   mudarStatusPedido,
   cotarFreteRestaurante,
   resolverRestauranteId,
@@ -16,6 +17,10 @@ import {
 } from '@geroncio/shared-db'
 
 const routes = Router()
+routes.post('/verificacoes/chave', async (_req, res, next) => {
+  try { res.json(await db.verificacaoCaixa.create({ data: {}, select: { chave: true } })) }
+  catch (erro) { next(erro) }
+})
 const incluirPedido = {
   itens: { include: { produto: true } },
   entrega: { include: { entregador: true } },
@@ -124,6 +129,47 @@ routes.post('/pedidos/cotacao-frete', async (req, res) => {
 })
 
 // 3. BUSCAR PEDIDO POR ID
+routes.patch('/pedidos/:id/verificacao', async (req, res) => {
+  const id = parseId(req.params.id)
+  const { versao, acao, itens } = req.body
+  if (id === null || !Number.isSafeInteger(versao) || versao < 0 || !['alterar', 'confirmar', 'cancelar'].includes(acao)) {
+    res.status(400).json({ error: 'Informe o pedido, a versão e uma ação válida' })
+    return
+  }
+  try {
+    const resultado = await db.$transaction(async (tx) => {
+      const bloqueado = await tx.pedido.updateMany({
+        where: { id, status: 'em_verificacao', estoqueBaixado: true, versaoVerificacao: versao },
+        data: { versaoVerificacao: { increment: 1 } },
+      })
+      if (!bloqueado.count) throw new ErroOperacao(409, 'Esta revisão mudou ou foi encerrada. Retome o pedido atualizado.')
+      if (acao === 'confirmar') return tx.pedido.update({ where: { id }, data: { status: 'novo' }, include: incluirPedido })
+      const pedido = await tx.pedido.findUniqueOrThrow({ where: { id }, include: { itens: true } })
+      const anterior = new Map(pedido.itens.map(i => [i.produtoId, i.quantidade]))
+      const novo = acao === 'alterar' ? await prepararItensPedido(tx, itens, pedido.restauranteId ?? undefined) : null
+      const diferencas = new Map([...anterior].map(([produtoId, qtd]) => [produtoId, -qtd]))
+      for (const item of novo?.itens ?? []) diferencas.set(item.produtoId, (diferencas.get(item.produtoId) ?? 0) + item.quantidade)
+      for (const [produtoId, quantidade] of [...diferencas].sort(([a], [b]) => a - b)) {
+        if (quantidade > 0) await debitarItensPedido(tx, [{ produtoId, quantidade }])
+        if (quantidade < 0) await tx.produto.update({ where: { id: produtoId }, data: {
+          quantidade: { increment: -quantidade }, versaoEstoque: { increment: 1 },
+        } })
+      }
+      if (!novo) {
+        await tx.pedido.delete({ where: { id } })
+        return { id }
+      }
+      return tx.pedido.update({ where: { id }, data: {
+        preco: novo.preco, itens: { deleteMany: {}, create: novo.itens },
+      }, include: incluirPedido })
+    })
+    res.json(resultado)
+  } catch (erro) {
+    if (erro instanceof ErroOperacao) res.status(erro.status).json({ error: erro.message })
+    else res.status(500).json({ error: 'Erro ao atualizar a verificação' })
+  }
+})
+
 routes.get('/pedidos/:id', async (req, res) => {
   const id = parseId(req.params.id)
   if (id === null) {
@@ -289,9 +335,22 @@ routes.post('/pedidos', async (req, res) => {
       distanciaKmFinal !== undefined
 
     const pedido = await db.$transaction(async (tx) => {
+      const chave = req.body.chaveVerificacao
+      if (chave !== undefined) {
+        if (typeof chave !== 'string' || !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(chave) || !['balcao', 'whatsapp'].includes(canal)) {
+          throw new ErroOperacao(400, 'Chave ou canal de verificação inválido')
+        }
+        const uso = await tx.verificacaoCaixa.updateMany({ where: { chave, usada: false }, data: { usada: true } })
+        if (!uso.count) {
+          const existente = await tx.pedido.findUnique({ where: { chaveVerificacao: chave }, include: incluirPedido })
+          if (existente) return existente
+          throw new ErroOperacao(409, 'Verificação inexistente ou já cancelada')
+        }
+      }
       const restaurante = restauranteId === undefined ? undefined : parseId(String(restauranteId))
       if (restaurante === null) throw new ErroOperacao(400, 'restauranteId inválido')
       const preparados = await prepararItensPedido(tx, itens, restaurante)
+      await debitarItensPedido(tx, preparados.itens)
       const clienteDoPedido = await obterOuCriarCliente(tx, idCliente, dadosCliente)
       // Nos pedidos manuais o valor vem do catálogo, sem confiar no total enviado pela tela.
       const total = ['balcao', 'whatsapp'].includes(canal) ? preparados.preco : Number(preco)
@@ -313,6 +372,8 @@ routes.post('/pedidos', async (req, res) => {
       return tx.pedido.create({
         data: {
           restauranteId: preparados.restauranteId,
+          estoqueBaixado: true,
+          ...(chave !== undefined && { chaveVerificacao: chave, status: StatusPedido.em_verificacao }),
           clienteId: clienteDoPedido?.id ?? null,
           preco: total,
           metodoPagamento,

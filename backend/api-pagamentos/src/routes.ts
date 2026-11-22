@@ -256,6 +256,10 @@ routes.post('/pagamentos/pedidos/:id/link', async (req, res) => {
       res.status(404).json({ error: 'Pedido não encontrado' })
       return
     }
+    if (pedido.status === 'em_verificacao') {
+      res.status(409).json({ error: 'Confirme a revisão do pedido antes de gerar o pagamento' })
+      return
+    }
     if (pedido.status === 'cancelado') {
       res.status(409).json({ error: 'Pedido cancelado não pode ser pago' })
       return
