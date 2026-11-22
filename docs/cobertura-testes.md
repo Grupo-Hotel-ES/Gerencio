@@ -64,6 +64,18 @@ describe "Catálogo de produtos"
   it "quando deleta o produto sem pedidos, então remove do banco; se tiver pedidos, então responde 409"
   it "quando arquiva o produto, então define data de arquivamento, incrementa versaoEstoque e bloqueia edições"
 
+describe "Mapeamento de catálogo para delivery"
+  it "quando cria mapeamento com plataforma em formato livre (ex: 'Uber Eats'), então normaliza a chave, persiste no banco e responde 201"
+  it "quando tenta mapear código já vinculado a outro produto ativo na mesma plataforma, então responde 409 com mensagem de conflito"
+  it "quando tenta cadastrar um segundo código da mesma plataforma para o mesmo produto, então responde 409"
+  it "quando cadastra código que pertencia a produto arquivado, então reatribui o código ao novo produto e remove o mapeamento anterior"
+  it "quando informa produto inexistente, arquivado ou dados inválidos, então responde 404 ou 400 sem gravar"
+  it "quando lista mapeamentos com filtro por restauranteId, então retorna apenas os vínculos de produtos daquele restaurante"
+  it "quando busca mapeamento por plataforma e código externo, então retorna 200 com os dados do produto vinculado"
+  it "quando deleta mapeamento por id, então remove do banco com 204 e libera o código para reuso"
+  it "quando cadastra produto vinculado a múltiplos canais simultâneos via POST /produtos/vincular, então persiste o produto e todos os mapeamentos em transação única"
+  it "quando tenta vincular com plataformas repetidas ou código em conflito, então responde 400 ou 409 sem criar o produto"
+
 describe "Webhook de delivery"
   it "quando dois webhooks iFood iguais chegam simultaneamente, então persiste um único evento"
   it "quando o webhook Rappi tem assinatura inválida, então responde 401 sem gravar"
@@ -97,10 +109,10 @@ Implementação: `backend/testes/clientes-pedidos.test.ts`, pelas APIs de client
 
 ## Resultado da execução local
 
-- Data: 16/11/2026.
-- Comando: `pnpm test:integracao` na raiz.
-- Ambiente: Node.js 24, PostgreSQL 16 em container temporário e 15 migrations existentes aplicadas no banco de teste vazio.
-- Resumo do Node: **42 testes em 6 suítes, 42 aprovados, 0 reprovados** (incluindo o Bloco 1 de Restaurantes, Bloco 2 de Produtos, Clientes, Delivery, Pagamentos Stripe, Ganhos de Motoboys e cenários legados de Pedidos/Estoque).
+- Data: 22/11/2026.
+- Comando: `pnpm test:integracao` (ou `node scripts/testar-integracao.mjs`) na raiz.
+- Ambiente: Node.js 24, PostgreSQL 16 em container temporário e 16 migrations existentes aplicadas no banco de teste vazio.
+- Resumo do Node: **54 testes em 7 suítes, 54 aprovados, 0 reprovados** (incluindo Bloco 1 de Restaurantes, Bloco 2 de Catálogo de Produtos, Bloco 3 de Mapeamento para Delivery, Clientes do Pedido, Delivery, Pagamentos Stripe, Ganhos de Motoboys e cenários de Pedidos/Estoque com verificação de balcão).
 - Ignorados, pendentes e cancelados: **zero**.
 - `pnpm typecheck` no backend: passou.
 - `pnpm exec tsc --noEmit -p testes/tsconfig.json`: passou.
