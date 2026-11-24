@@ -2,13 +2,14 @@ import { Link } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Etiqueta, Icone, Texto } from './ui';
+import { Botao, Etiqueta, Icone, Texto } from './ui';
 
 import { Espacamento, Raio } from '@/constants/tokens';
 import { formatarHora } from '@/data/pedidos';
 import { usePerfil } from '@/data/perfil-context';
 import { useCores } from '@/hooks/use-cores';
 import { useEstadoOffline } from '@/services/cache-offline';
+import { sincronizarFilaOffline, useFilaOffline } from '@/services/fila-offline';
 
 function formatarAgora(agora: Date) {
   const data = agora.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -26,6 +27,7 @@ export function TopBar() {
   const cores = useCores();
   const { perfil, iniciais } = usePerfil();
   const estadoOffline = useEstadoOffline();
+  const filaOffline = useFilaOffline();
 
   // Preenchido só no cliente para não divergir do HTML gerado na renderização estática.
   const [agora, setAgora] = useState<Date | null>(null);
@@ -53,6 +55,26 @@ export function TopBar() {
         <Etiqueta
           rotulo={formatarRotuloOffline(estadoOffline.ultimoCacheUsadoEm)}
           corPonto={cores.statusPreparando}
+        />
+      )}
+      {filaOffline.pendentes > 0 && (
+        <Botao
+          rotulo={
+            filaOffline.sincronizando
+              ? 'Sincronizando…'
+              : `Fila offline: ${filaOffline.pendentes} pendente${filaOffline.pendentes === 1 ? '' : 's'}`
+          }
+          icone="sincronizar"
+          disabled={filaOffline.sincronizando}
+          onPress={() => {
+            void sincronizarFilaOffline();
+          }}
+        />
+      )}
+      {filaOffline.conflitos > 0 && (
+        <Etiqueta
+          rotulo={`${filaOffline.conflitos} conflito${filaOffline.conflitos === 1 ? '' : 's'} de estoque`}
+          corPonto={cores.feedbackErro}
         />
       )}
 

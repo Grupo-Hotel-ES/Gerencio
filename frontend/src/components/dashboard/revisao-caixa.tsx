@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { formatarReais } from '@/data/pedidos';
-import { requisitar, type RevisaoCaixa } from '@/services/api-pedidos';
+import { atualizarVerificacaoPedido, type RevisaoCaixa } from '@/services/api-pedidos';
 import { listarProdutos, type Produto } from '@/services/api-produtos';
 import { Botao, Cartao, Texto } from './ui';
 
@@ -26,10 +26,12 @@ export function RevisaoDoCaixa({ pedido, fechar, atualizar }: {
     if (trava.current) return;
     trava.current = true; setOcupado(true); setErro('');
     try {
-      const atualizado = await requisitar<RevisaoCaixa>(`/pedidos/${pedido.id}/verificacao`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ acao, versao: pedido.versaoVerificacao, itens }),
-      });
+      const atualizado = await atualizarVerificacaoPedido(
+        pedido.id,
+        acao,
+        pedido.versaoVerificacao,
+        itens,
+      );
       if (acao === 'alterar') atualizar(atualizado);
       else fechar();
     } catch (e) { setErro((e as Error).message); }
@@ -37,8 +39,9 @@ export function RevisaoDoCaixa({ pedido, fechar, atualizar }: {
   }
   const nomes = new Map(pedido.itens.map(i => [i.produtoId, i.produto.nome]));
   for (const p of catalogo) nomes.set(p.id, p.nome);
+  const rotuloId = pedido.id < 0 ? `OFF-${Math.abs(pedido.id)}` : String(pedido.id);
   return <Cartao>
-    <Texto peso={600}>Pedido #{pedido.id} em verificação · {pedido.cliente?.nomeCliente}</Texto>
+    <Texto peso={600}>Pedido #{rotuloId} em verificação · {pedido.cliente?.nomeCliente}</Texto>
     <Texto>Estoque reservado: {pedido.itens.map(i => `${i.quantidade} × ${i.produto.nome}`).join(', ')}</Texto>
     <Texto>Total reservado: {formatarReais(Number(pedido.preco) + Number(pedido.entrega?.custoEntrega ?? 0))}</Texto>
     {[...nomes].map(([id, nome]) => <Cartao key={id}>

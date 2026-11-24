@@ -6,7 +6,14 @@ import {
   type StatusAtivo,
   type StatusPedido,
 } from '@/data/pedidos';
-import { requisitarApi } from './http';
+import {
+  atualizarStatusPedidoOffline,
+  atualizarVerificacaoOffline,
+  criarPedidoOffline,
+  obterResumoFilaOffline,
+  sincronizarFilaOffline,
+} from './fila-offline';
+import { ErroApi, requisitarApi } from './http';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_PEDIDOS_URL ?? 'http://localhost:3002/api';
 
@@ -82,6 +89,9 @@ export async function requisitar<T>(caminho: string, init?: RequestInit, tempoLi
 
 /** Pedidos ativos, incluindo os que estão em entrega, do mais recente para o mais antigo. */
 export async function listarPedidosAtivos(): Promise<Pedido[]> {
+  if (obterResumoFilaOffline().pendentes > 0) {
+    await sincronizarFilaOffline().catch(() => undefined);
+  }
   const pedidos = await requisitar<PedidoApi[]>(`/pedidos?status=${STATUS_ATIVOS.join(',')}`);
   return pedidos.map(converter);
 }
@@ -134,10 +144,64 @@ export async function criarPedido(dados: NovoPedido & { chaveVerificacao: string
   });
 }
 
+/**
+ * Cria o pedido em verificação no servidor quando online ou registra na fila Outbox
+ * com baixa otimista do estoque local quando sem internet.
+ */
+export async function iniciarVerificacaoPedido(
+  dados: NovoPedido,
+  chaveExistente: string | null,
+): Promise<{ chave: string | null; pedido: RevisaoCaixa }> {
+  try {
+    const chave =
+      chaveExistente ??
+      (await requisitar<{ chave: string }>('/verificacoes/chave', { method: 'POST' })).chave;
+    const pedido = await criarPedido({ ...dados, chaveVerificacao: chave });
+    return { chave, pedido };
+  } catch (erro) {
+    if (erro instanceof ErroApi) throw erro;
+    const pedidoOffline = criarPedidoOffline(dados);
+    return { chave: chaveExistente, pedido: pedidoOffline };
+  }
+}
+
+/**
+ * Altera, confirma ou cancela uma revisão do caixa (online ou na fila offline).
+ */
+export async function atualizarVerificacaoPedido(
+  pedidoId: number,
+  acao: 'alterar' | 'confirmar' | 'cancelar',
+  versao: number,
+  itens: { produtoId: number; quantidade: number }[],
+): Promise<RevisaoCaixa> {
+  if (pedidoId < 0) {
+    return atualizarVerificacaoOffline(pedidoId, acao, versao, itens);
+  }
+  try {
+    return await requisitar<RevisaoCaixa>(`/pedidos/${pedidoId}/verificacao`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acao, versao, itens }),
+    });
+  } catch (erro) {
+    if (erro instanceof ErroApi) throw erro;
+    return atualizarVerificacaoOffline(pedidoId, acao, versao, itens);
+  }
+}
+
 export async function atualizarStatus(numero: number, status: StatusPedido): Promise<void> {
-  await requisitar(`/pedidos/${numero}/status`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status }),
-  });
+  if (numero < 0) {
+    atualizarStatusPedidoOffline(numero, status);
+    return;
+  }
+  try {
+    await requisitar(`/pedidos/${numero}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+  } catch (erro) {
+    if (erro instanceof ErroApi) throw erro;
+    atualizarStatusPedidoOffline(numero, status);
+  }
 }

@@ -8,7 +8,7 @@ import { descreverCliente, type Cliente } from '@/data/clientes';
 import { formatarReais } from '@/data/pedidos';
 import { useCores } from '@/hooks/use-cores';
 import { buscarClientesSemelhantes } from '@/services/api-clientes';
-import { cotarFrete, criarPedido, requisitar, type CotacaoFrete, type NovoPedido, type RevisaoCaixa } from '@/services/api-pedidos';
+import { cotarFrete, iniciarVerificacaoPedido, type CotacaoFrete, type NovoPedido, type RevisaoCaixa } from '@/services/api-pedidos';
 import { listarProdutos, type Produto } from '@/services/api-produtos';
 
 type CampoCliente = 'nome' | 'endereco';
@@ -113,9 +113,7 @@ export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: (pedido
     }
     enviando.current = true; setSalvando(true); setErro(null);
     try {
-      chave.current ??= (await requisitar<{ chave: string }>('/verificacoes/chave', { method: 'POST' })).chave;
-      const pedido = await criarPedido({
-        chaveVerificacao: chave.current,
+      const resultado = await iniciarVerificacaoPedido({
         ...(clienteId !== null
           ? { clienteId }
           : { cliente: { nome: nomeCliente.trim(), endereco: enderecoCliente.trim(), telefone: telefone.trim() } }),
@@ -125,8 +123,10 @@ export function FormularioPedido({ onConcluir, onFechar }: { onConcluir: (pedido
         ...(cotacao?.taxaEntrega != null && {
           custoEntrega: cotacao.taxaEntrega, distanciaKm: cotacao.distanciaKm,
           latitude: cotacao.destino.latitude, longitude: cotacao.destino.longitude,
-        }) });
-      onConcluir(pedido);
+        }),
+      }, chave.current);
+      chave.current = resultado.chave;
+      onConcluir(resultado.pedido);
     } catch (e) { setErro((e as Error).message); }
     finally { enviando.current = false; setSalvando(false); }
   };
