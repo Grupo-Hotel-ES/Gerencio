@@ -220,6 +220,7 @@ export default function ControleDeMotoboys() {
             rotulo="Cadastrar motoboy"
             icone="mais"
             variante="primario"
+            disabled
             onPress={abrirFormularioNovo}
           />
         </View>
