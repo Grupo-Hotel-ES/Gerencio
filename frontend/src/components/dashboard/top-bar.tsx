@@ -8,15 +8,24 @@ import { Espacamento, Raio } from '@/constants/tokens';
 import { formatarHora } from '@/data/pedidos';
 import { usePerfil } from '@/data/perfil-context';
 import { useCores } from '@/hooks/use-cores';
+import { useEstadoOffline } from '@/services/cache-offline';
 
 function formatarAgora(agora: Date) {
   const data = agora.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' });
   return `Hoje, ${data.replace(/ de /g, ' ')} • ${formatarHora(agora)}`;
 }
 
+function formatarRotuloOffline(ultimoCacheUsadoEm: string | null) {
+  if (!ultimoCacheUsadoEm) return 'Modo offline';
+  const data = new Date(ultimoCacheUsadoEm);
+  if (Number.isNaN(data.getTime())) return 'Modo offline';
+  return `Modo offline • dados de ${formatarHora(data)}`;
+}
+
 export function TopBar() {
   const cores = useCores();
   const { perfil, iniciais } = usePerfil();
+  const estadoOffline = useEstadoOffline();
 
   // Preenchido só no cliente para não divergir do HTML gerado na renderização estática.
   const [agora, setAgora] = useState<Date | null>(null);
@@ -27,6 +36,8 @@ export function TopBar() {
     return () => clearInterval(intervalo);
   }, []);
 
+  const emModoOffline = !estadoOffline.online || estadoOffline.usandoCacheOffline;
+
   return (
     <View style={[styles.container, { backgroundColor: cores.superficie }]}>
       <Texto tamanho={16} peso={500}>
@@ -36,6 +47,12 @@ export function TopBar() {
         <Etiqueta
           rotulo={perfil.lojaAberta ? 'Loja aberta' : 'Loja fechada'}
           corPonto={perfil.lojaAberta ? cores.statusEntregue : cores.statusCancelado}
+        />
+      )}
+      {emModoOffline && (
+        <Etiqueta
+          rotulo={formatarRotuloOffline(estadoOffline.ultimoCacheUsadoEm)}
+          corPonto={cores.statusPreparando}
         />
       )}
 

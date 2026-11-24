@@ -3,7 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { Platform } from 'react-native';
 
 import { buscarUsuarioDaSessao, entrar as entrarNaApi, type Usuario } from '@/services/api-conta';
-import { definirSessaoHttp } from '@/services/http';
+import { limparCacheLeitura } from '@/services/cache-offline';
+import { definirSessaoHttp, ErroApi } from '@/services/http';
 
 const CHAVE_TOKEN = 'geroncio.token';
 
@@ -54,10 +55,11 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
   const sair = useCallback(() => {
     definirSessaoHttp(null);
     setUsuario(null);
+    limparCacheLeitura();
     armazenamento.gravar(null);
   }, []);
 
-  // Restaura a sessão salva e confere se o token ainda vale
+  // Restaura a sessão salva e confere se o token ainda vale (ou usa o cache offline se sem internet)
   useEffect(() => {
     let ativo = true;
     armazenamento.ler().then(async (token) => {
@@ -66,22 +68,29 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
         try {
           const dados = await buscarUsuarioDaSessao();
           if (ativo) setUsuario(dados);
-        } catch {
-          if (ativo) sair();
+        } catch (erro) {
+          if (ativo && erro instanceof ErroApi && erro.status === 401) {
+            sair();
+          }
         }
       }
       if (ativo) setCarregando(false);
     });
-    return () => { ativo = false; };
+    return () => {
+      ativo = false;
+    };
   }, [sair]);
 
-  const entrar = useCallback(async (login: string, senha: string, lembrar: boolean) => {
-    const { token, usuario: dados } = await entrarNaApi(login, senha);
-    definirSessaoHttp(token, sair);
-    // Sem "manter conectado", a sessão vale só enquanto o app estiver aberto
-    await armazenamento.gravar(lembrar ? token : null);
-    setUsuario(dados);
-  }, [sair]);
+  const entrar = useCallback(
+    async (login: string, senha: string, lembrar: boolean) => {
+      const { token, usuario: dados } = await entrarNaApi(login, senha);
+      definirSessaoHttp(token, sair);
+      // Sem "manter conectado", a sessão vale só enquanto o app estiver aberto
+      await armazenamento.gravar(lembrar ? token : null);
+      setUsuario(dados);
+    },
+    [sair],
+  );
 
   return (
     <SessaoContext.Provider value={{ carregando, usuario, entrar, sair, atualizarUsuario: setUsuario }}>
